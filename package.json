@@ -1,0 +1,20 @@
+{
+	"name": "Q.AI",
+	"description": "AI Plugin",
+	"author": "Qbix",
+	"homepage": "https://qbix.com/platform",
+	"license": "AGPL-1.0",
+	"version": "1.0.0",
+	"engines": {
+		"node": ">= 0.6.0"
+	},
+	"//": "@tensorflow/tfjs-node the last supported Win version is 3.18.0, don't use higher versions under Win",
+	"dependencies": {
+		"@tensorflow-models/blazeface": "0.1.0",
+		"@tensorflow/tfjs-node": "^4.14.0"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git://github.com/EGreg/Q.git"
+	}
+}

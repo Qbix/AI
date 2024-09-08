@@ -1,0 +1,48 @@
+{
+	"Q": {
+		"pluginInfo": {
+			"AI": {
+				"version": "0.1",
+				"compatible": "0.1",
+				"requires": {
+					"Q": "1.0",
+					"Users": "1.0",
+					"Streams": "1.0",
+					"Websites": "1.0"
+				},
+				"permissions": [],
+				"connections": ["Users", "Streams", "Websites"]
+			}
+		},
+		"handlersBeforeEvent": {
+
+		},
+		"handlersAfterEvent": {
+			/*"Streams/create/Streams/image": ["AI/after/Streams_create_Streams_image"]*/
+		},
+		"routes@end": {
+			
+		},
+		"routes": {
+		    
+		},
+		"web": {
+
+		},
+		"javascript": {
+
+		},
+		"text": {
+
+		},
+		"images": {
+
+		}
+	},
+	"Users": {
+
+	},
+	"Streams": {
+
+	}
+}
