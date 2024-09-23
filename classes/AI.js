@@ -7,6 +7,7 @@
  * @main AI
  */
 var Q = require('Q');
+var Users = Q.require('Users');
 var Streams = require('Streams');
 var Db = Q.require('Db');
 
@@ -18,7 +19,6 @@ var Db = Q.require('Db');
 function AI() { }
 module.exports = AI;
 
-var Users = Q.plugins.Users;
 var socket = null;
 
 AI.Image = Q.require('AI/Image');
