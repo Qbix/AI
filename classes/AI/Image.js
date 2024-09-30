@@ -72,7 +72,7 @@ AI_Image.estimateFaces = function (imagePath, callback) {
         return;
     }
 
-    var blazeface = require('@tensorflow-models/blazeface');
+    var tfFaceDetection = require('@tensorflow-models/face-detection');
     var tfCore = require('@tensorflow/tfjs-core');
     require('@tensorflow/tfjs-converter');
     /*
@@ -83,7 +83,7 @@ AI_Image.estimateFaces = function (imagePath, callback) {
 
     try {
         tfCore.setBackend(tfNode ? "tensorflow" : "wasm").then(function () {
-            blazeface.load().then(function (model) {
+            tfFaceDetection.load().then(function (model) {
                 fs.readFile(imagePath, (err, data) => {
                     if (err) {
                         return console.log(err);
