@@ -35,5 +35,10 @@ function AI_webhook_transcription_index($params)
             . "\n" . json_encode($results['keywords'])
             . "\n" . $results['summary'] . PHP_EOL . PHP_EOL;
     }
-    file_put_contents(APP_FILES_DIR . DS . 'output.txt', $result);
+    $basename = basename($fetched['audio_url']) . '.summary';
+    $path = APP_FILES_DIR . DS . 'AI' . DS . 'transcriptions';
+    if (!file_exists($path)) {
+        mkdir($path, 0777, true);
+    }
+    file_put_contents($path . DS . $basename, $result);
 }
