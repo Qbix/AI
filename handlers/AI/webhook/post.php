@@ -11,6 +11,7 @@ function AI_webhook_post()
     if ($headerValue !== Users::secretToken($platform, $appId)) {
         throw new Users_Exception_NotAuthorized();
     }
+    Q_Response::flushEarly();
     Q::event("AI/webhook/{$uri->type}/{$uri->task}", compact(
         'platform', 'appId'
     ));
