@@ -8,7 +8,6 @@ function AI_webhook_transcription_index($params)
     if (!file_exists($path)) {
         mkdir($path, 0777, true);
     }
-    file_put_contents($path . DS . "$basename.transcript", json_encode($fetched));
     $lines = '';
     foreach ($fetched['utterances'] as $u) {
         $line = !empty($fetched['speaker_labels'])
@@ -17,7 +16,10 @@ function AI_webhook_transcription_index($params)
         $start = $u['start'];
         $end = $u['end'];
         $entries[] = compact('line', 'start', 'end');
+        $hms = Q_Utils::secondsToHMS($start / 1000);
+        $lines .= "$hms | " . $line . "\n";
     }
+    file_put_contents($path . DS . "$basename.transcript", $lines);
     $count = count($entries);
     $chunks = array_chunk($entries, ceil($count/10), true);
     $result = '';
