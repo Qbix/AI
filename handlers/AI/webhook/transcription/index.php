@@ -3,6 +3,8 @@
 function AI_webhook_transcription_index($params)
 {
     $fetched = Q::event("AI/webhook/transcription/fetch/".$params['platform']);
+    $basename = Q::ifset($_REQUEST, 'basename', basename($fetched['audio_url']));
+    file_put_contents($path . DS . "$basename.transcript", json_encode($fetched));
     $lines = '';
     foreach ($fetched['utterances'] as $u) {
         $line = !empty($fetched['speaker_labels'])
@@ -35,10 +37,9 @@ function AI_webhook_transcription_index($params)
             . "\n" . json_encode($results['keywords'])
             . "\n" . $results['summary'] . PHP_EOL . PHP_EOL;
     }
-    $basename = Q::ifset($_REQUEST, 'basename', basename($fetched['audio_url'])) . '.summary';
     $path = APP_FILES_DIR . DS . 'AI' . DS . 'transcriptions';
     if (!file_exists($path)) {
         mkdir($path, 0777, true);
     }
-    file_put_contents($path . DS . $basename, $result);
+    file_put_contents($path . DS . "$basename.summary", $result);
 }
