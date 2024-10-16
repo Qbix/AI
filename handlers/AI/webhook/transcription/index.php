@@ -35,7 +35,7 @@ function AI_webhook_transcription_index($params)
             . "\n" . json_encode($results['keywords'])
             . "\n" . $results['summary'] . PHP_EOL . PHP_EOL;
     }
-    $basename = basename($fetched['audio_url']) . '.summary';
+    $basename = Q::ifset($_REQUEST, 'basename', basename($fetched['audio_url'])) . '.summary';
     $path = APP_FILES_DIR . DS . 'AI' . DS . 'transcriptions';
     if (!file_exists($path)) {
         mkdir($path, 0777, true);
