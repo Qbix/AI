@@ -24,7 +24,7 @@
 			
 		},
 		"routes": {
-		    
+		    "AI/webhook/:type/:task": {"module": "AI", "action": "webhook"}
 		},
 		"web": {
 

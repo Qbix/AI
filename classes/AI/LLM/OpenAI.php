@@ -4,18 +4,20 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
 {
     /**
      * @method chatCompletions
-     * @param {array} messages An array of role => content, where role can be "system", "user", "assistant"
+     * @param {array} $messages An array of role => content, where role can be "system", "user", "assistant"
      * @param {array} $options
-     * @param {string} [$model="gpt-3.5-turbo"] You can override which chat model to use
-     * @param {integer} [$max_tokens=3000] Maximum number of tokens to return
-     * @param {integer} [$temperature=0.9] How many results to return
-     * @param {integer} [$numResults=1] How many results to return
-     * @param {integer} [$presencePenalty=2]
-     * @param {integer} [$frequencyPenalty=2]
+     * @param {string} [$options.model="gpt-4o-mini"] You can override which chat model to use
+     * @param {integer} [$options.max_tokens=3000] Maximum number of tokens to return
+     * @param {integer} [$options.temperature=0.9] How many results to return
+     * @param {integer} [$options.numResults=1] How many results to return
+     * @param {integer} [$options.presencePenalty=2]
+     * @param {integer} [$options.frequencyPenalty=2]
+     * @param {integer} [$options.timeout=300]
      * @return {array} Contains "errors" or "choices" keys
      */
-    function chatCompletions(array $messages, $options = array()) {
-        $apiKey = Q_Config::expect('Streams', 'openAI', 'key');
+    function chatCompletions(array $messages, $options = array())
+    {
+        $apiKey = Q_Config::expect('AI', 'openAI', 'key');
         $headers = array(
             "Content-Type: application/json",
             "Authorization: Bearer $apiKey"
@@ -25,7 +27,7 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
             $m[] = compact('role', 'content');
         }
         $payload = array(
-            "model" =>Q::ifset($options, 'numResults', "gpt-3.5-turbo"),
+            "model" => Q::ifset($options, 'numResults', "gpt-4o-mini"),
             "max_tokens" => Q::ifset($options, 'numResults', 3000),
             "temperature" => Q::ifset($options, 'numResults', 0.9),
             "n" => Q::ifset($options, 'numResults', 1),
@@ -33,7 +35,12 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
             "frequency_penalty" => 2,
             "messages" => $m
         );
-        $json = Q_Utils::post('https://api.openai.com/v1/chat/completions', $payload, null, null, $headers);
+        $timeout = Q_Config::get('AI', 'openAI', 'timeout', 300);
+        $json = Q_Utils::post(
+            'https://api.openai.com/v1/chat/completions', 
+            $payload, null, null, $headers,
+            Q::ifset($options, 'timeout', $timeout)
+        );
         return json_decode($json, true);
     }
     
