@@ -46,7 +46,7 @@ Then, accurately summarize the content, in one single cohesive and easy-to-follo
 Avoid run-on sentences and multiple paragraphs, just make the summary accurate and succinct.
 When summarizing, please ignore any sentences that seem like they're part of an advertisement inserted inside the transcript.
 Do not refer to the speakers A, B, etc. directly, or the hosts.
-Neither should you refer to "the content", "the text", "the discussion", "the conversation" or anything meta like that.
+You should not refer to "the content", "the text", "the discussion", "the conversation" or anything meta like that.
 Just summarize the substance of what is being said by the speakers,
 as if it was a shorter version being said by one speaker.
 HEREDOC;
