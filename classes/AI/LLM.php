@@ -107,19 +107,24 @@ HEREDOC;
         $content = trim(Q::ifset(
             $completions, 'choices', 0, 'message', 'content', ''
         ));
-        $parts = explode("\n\n", $content);
-        $keywordsString = Q::ifset($parts, 0, '');
-        $summary = Q::ifset($parts, 1, '');
-        $speakers = Q::ifset($parts, 2, '');
-
-        $keywords = preg_split('/\s*,\s*/', trim($keywordsString));
-        if (trim($speakers) === 'no names') {
+        
+        // Optionally strip code fences if hallucinated
+        $content = preg_replace('/^```(?:json)?\s*|\s*```$/m', '', $content);
+        
+        // Extract content between tags
+        preg_match('/<keywords>(.*?)<\/keywords>/s', $content, $k);
+        preg_match('/<summary>(.*?)<\/summary>/s', $content, $s);
+        preg_match('/<speakers>(.*?)<\/speakers>/s', $content, $sp);
+        
+        $keywordsString = trim($k[1] ?? '');
+        $summary = trim($s[1] ?? '');
+        $speakers = trim($sp[1] ?? '');
+        
+        $keywords = preg_split('/\s*,\s*/', $keywordsString);
+        if (strtolower($speakers) === 'no names') {
             $speakers = '';
         }
-        $keywords = preg_split('/\s*,\s*/', trim($keywordsString));
-        if ($speakers === 'no names') {
-            $speakers = '';
-        }
-        return compact('keywords', 'summary', 'speakers');
+        
+        return compact('keywords', 'summary', 'speakers');        
     }
 }
