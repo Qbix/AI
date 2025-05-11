@@ -33,7 +33,7 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
             "n" => Q::ifset($options, 'numResults', 1),
             "presence_penalty" => Q::ifset($options, 'presencePenalty', 2),
             "frequency_penalty" => Q::ifset($options, 'frequencyPenalty', 2),
-            "messages" => $formatted
+            "messages" => $m
         );
         $timeout = Q_Config::get('AI', 'openAI', 'timeout', 300);
         $json = Q_Utils::post(
