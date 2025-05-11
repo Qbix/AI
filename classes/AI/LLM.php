@@ -41,6 +41,7 @@ class AI_LLM implements AI_LLM_Interface
         if (!isset($options['max_tokens'])) {
             $options['max_tokens'] = 1000;
         }
+        $options['response_format'] = 'json';
         $keywordsInstructions = <<<HEREDOC
 Under "keywords" you have an array containing 50 strings that are 1-word keywords or 2-word key phrases, that would help someone find the text to be summarized
 in the archives. Please list only the most common 1-word keywords or 2-word key phrases

@@ -13,6 +13,7 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
      * @param {integer} [$options.presencePenalty=2]
      * @param {integer} [$options.frequencyPenalty=2]
      * @param {integer} [$options.timeout=300]
+     * @param {string} [$options.response_format=null] If set to "json", the response will be in JSON format
      * @return {array} Contains "errors" or "choices" keys
      */
     function chatCompletions(array $messages, $options = array())
@@ -35,6 +36,9 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
             "frequency_penalty" => Q::ifset($options, 'frequencyPenalty', 2),
             "messages" => $m
         );
+        if (Q::ifset($options, 'response_format', null) == 'json') {
+            $payload['response_format'] = 'json';
+        }
         $timeout = Q_Config::get('AI', 'openAI', 'timeout', 300);
         $json = Q_Utils::post(
             'https://api.openai.com/v1/chat/completions', 
