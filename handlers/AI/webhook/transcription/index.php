@@ -37,10 +37,11 @@ function AI_webhook_transcription_index($params)
         $end = $last['end'];
         $LLM = new AI_LLM_OpenAI();
         $results = $LLM->summarize($source);
+        $keywords = $LLM->keywords($results['keywords']);
         $s = floor($start / 1000);
         $hms = Q_Utils::secondsToHMS($s);
         $result .= "[$hms]"
-            . "\n" . json_encode($results['keywords'])
+            . "\n" . json_encode($keywords)
             . "\n" . $results['summary'] . PHP_EOL . PHP_EOL;
     }
     file_put_contents($path . DS . "$basename.summary", $result);
