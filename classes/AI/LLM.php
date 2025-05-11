@@ -85,7 +85,7 @@ This is the 1-paragraph summary of the main points from the text.
 </summary>
 
 <speakers>
-Mark, Stephanie
+name1, name2
 </speakers>
 ===
 
