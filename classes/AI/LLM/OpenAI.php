@@ -38,6 +38,7 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
         );
         if (Q::ifset($options, 'response_format', null) == 'json') {
             $payload['response_format'] = 'json';
+            $headers[] = "OpenAI-Beta: response_format=json";
         }
         $timeout = Q_Config::get('AI', 'openAI', 'timeout', 300);
         $json = Q_Utils::post(
