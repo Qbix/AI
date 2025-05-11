@@ -75,10 +75,10 @@ HEREDOC;
         if (!trim($text)) {
             return array();
         }
-        $user = $instructions . $text;
+        $content = $instructions . $text;
         $messages = array(
-            'system' => 'You are generating a concise summary and determining the best keywords',
-            'user' => $user
+            array('role' => 'system', 'content' => 'You are generating a concise summary and determining the best keywords'),
+            array('role' => 'user', 'content' => $content)
         );
         $completions = $this->chatCompletions($messages, $options);
         $content = trim(Q::ifset(
