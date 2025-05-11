@@ -165,14 +165,14 @@ Please expand this list into up to 1000 relevant, comma-separated search terms. 
 Rules:
 - Output only one line of comma-separated strings
 - No duplicates
-- No phrases longer than 4 words
-- All terms should be lowercase and relevant to search
+- No phrases longer than 3 words
+- All terms should be relevant to searching
 - Do not use bullet points, JSON, or extra formatting
 HEREDOC;
 
         $messages = [
-            ['role' => 'system', 'content' => 'You expand keywords for content indexing.'],
-            ['role' => 'user', 'content' => $prompt]
+            'system' => 'You expand keywords for content indexing.',
+            'user' => $prompt
         ];
 
         $options = array_merge([
