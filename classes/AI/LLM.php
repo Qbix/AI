@@ -91,8 +91,16 @@ HEREDOC;
         $content = trim(Q::ifset(
             $completions, 'choices', 0, 'message', 'content', ''
         ));
-        list($keywordsString, $summary, $speakers) = explode("\n\n", $content);
-        $keywords = preg_split ('/(\s*,*\s*)*,+(\s*,*\s*)*/', str_replace(array(';', '.'), ',', $keywordsString));
+        $parts = explode("\n\n", $content);
+        $keywordsString = Q::ifset($parts, 0, '');
+        $summary = Q::ifset($parts, 1, '');
+        $speakers = Q::ifset($parts, 2, '');
+
+        $keywords = preg_split('/\s*,\s*/', trim($keywordsString));
+        if (trim($speakers) === 'no names') {
+            $speakers = '';
+        }
+        $keywords = preg_split('/\s*,\s*/', trim($keywordsString));
         if ($speakers === 'no names') {
             $speakers = '';
         }
