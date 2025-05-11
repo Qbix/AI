@@ -126,4 +126,72 @@ HEREDOC;
         
         return compact('keywords', 'summary', 'speakers');        
     }
+
+    /**
+     * Expand a list of canonical keywords into related terms for search indexing.
+     * 
+     * This method sends the given keywords to the language model and requests
+     * expansion into related search terms. It is intended to be used both
+     * during content insertion and during query processing.
+     * 
+     * When used during insert time, the model is encouraged to expand the keywords
+     * broadly and include synonyms, alternate phrasings, and variations.
+     * 
+     * When used during query time, the expansion is narrower and more literal,
+     * intended to match only closely relevant synonyms or rephrasings that improve recall.
+     * 
+     * @method keywords
+     * @param {array} $keywords An array of 1-word or 2-word canonical keyword strings.
+     * @param {string} $during Either 'insert' or 'query' to control expansion depth.
+     * @param {array} [$options=array()] Optional OpenAI options like model or temperature.
+     * @return {array} An array of expanded keyword terms (strings), deduplicated and lowercased.
+     */
+    function keywords(array $keywords, $during = 'insert', $options = array())
+    {
+        if (empty($keywords)) return [];
+
+        $original = implode(', ', $keywords);
+        $modeDescription = $during === 'query'
+            ? "closely related synonyms and rephrasings"
+            : "a wide variety of synonyms, variations, alternate phrasing, related terms, abbreviations, and common search terms";
+
+        $prompt = <<<HEREDOC
+You are helping build a high-quality search index. The following is a list of canonical keywords:
+
+$original
+
+Please expand this list into up to 1000 relevant, comma-separated search terms. Include $modeDescription that a human might search for when looking for content associated with the original keywords.
+
+Rules:
+- Output only one line of comma-separated strings
+- No duplicates
+- No phrases longer than 4 words
+- All terms should be lowercase and relevant to search
+- Do not use bullet points, JSON, or extra formatting
+HEREDOC;
+
+        $messages = [
+            ['role' => 'system', 'content' => 'You expand keywords for content indexing.'],
+            ['role' => 'user', 'content' => $prompt]
+        ];
+
+        $options = array_merge([
+            'model' => 'gpt-4o',
+            'temperature' => $during === 'query' ? 0.3 : 0.7,
+            'max_tokens' => 2000,
+        ], $options);
+
+        $completions = $this->chatCompletions($messages, $options);
+        $content = trim(Q::ifset($completions, 'choices', 0, 'message', 'content', ''));
+
+        // Remove any markdown code fences if hallucinated
+        $content = preg_replace('/^```(?:json)?\s*|\s*```$/m', '', $content);
+
+        // Parse and sanitize the final list
+        $expanded = preg_split('/\s*,\s*/', $content);
+        $expanded = array_unique(array_filter(array_map('strtolower', $expanded)));
+
+        return $expanded;
+    }
+
 }
