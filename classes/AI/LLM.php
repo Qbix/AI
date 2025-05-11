@@ -13,7 +13,7 @@ class AI_LLM implements AI_LLM_Interface
      * @param {array} $options
      * @param {string} [$model="gpt-3.5-turbo"] You can override which chat model to use
      * @param {integer} [$max_tokens=3000] Maximum number of tokens to return
-     * @param {integer} [$temperature=0.9] How many results to return
+     * @param {integer} [$temperature=0.5] How many results to return
      * @param {integer} [$numResults=1] How many results to return
      * @param {integer} [$presencePenalty=2]
      * @param {integer} [$frequencyPenalty=2]
@@ -30,10 +30,17 @@ class AI_LLM implements AI_LLM_Interface
      * @method summarize
      * @param {string} $text the text to summarize, should fit into the LLM's context window
      * @param {array} [$options=array()] see options of chatCompletions
+     * @param {array} [$options.temperature=0] sets 0 temperature for summaries by default
      * @return {array} An array with keys "summary", "keywords" and "speakers"
      */
     function summarize($text, $options = array())
     {
+        if (!isset($options['temperature'])) {
+            $options['temperature'] = 0;
+        }
+        if (!isset($options['max_tokens'])) {
+            $options['max_tokens'] = 1000;
+        }
         $keywordsInstructions = <<<HEREDOC
 Under "keywords" you have an array containing 50 strings that are 1-word keywords or 2-word key phrases, that would help someone find the text to be summarized
 in the archives. Please list only the most common 1-word keywords or 2-word key phrases
@@ -59,7 +66,7 @@ HEREDOC;
 I need you to summarize some text and output a JSON structure.
 I am including the text to be summarized after these instructions.
 Follow the instructions exactly. Do not include any bold headers. 
-Please output JSON of a Javascript object with the keys "keywords", "summary", "speakers".
+No preambles, please output only JSON of a Javascript object with the keys "keywords", "summary", "speakers".
 
 $keywordsInstructions
 
@@ -84,11 +91,6 @@ HEREDOC;
         $content = trim(Q::ifset(
             $completions, 'choices', 0, 'message', 'content', ''
         ));
-        list($keywordsString, $summary, $speakers) = explode("\n\n", $content);
-        $keywords = preg_split ('/(\s*,*\s*)*,+(\s*,*\s*)*/', str_replace(array(';', '.'), ',', $keywordsString));
-        if ($speakers === 'no names') {
-            $speakers = '';
-        }
-        return compact('keywords', 'summary', 'speakers');
+        return json_decode($content, true);
     }
 }

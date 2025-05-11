@@ -29,7 +29,7 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
         $payload = array(
             "model" => Q::ifset($options, 'model', 'gpt-4o-mini'),
             "max_tokens" => Q::ifset($options, 'max_tokens', 3000),
-            "temperature" => Q::ifset($options, 'temperature', 0.9),
+            "temperature" => Q::ifset($options, 'temperature', 0.5),
             "n" => Q::ifset($options, 'numResults', 1),
             "presence_penalty" => Q::ifset($options, 'presencePenalty', 2),
             "frequency_penalty" => Q::ifset($options, 'frequencyPenalty', 2),
