@@ -42,38 +42,46 @@ class AI_LLM implements AI_LLM_Interface
             $options['max_tokens'] = 1000;
         }
         $keywordsInstructions = <<<HEREDOC
-Inside the keywords section, please output 50 comma-separated entries consisting of 1-word keywords or 2-word key phrases,
-that would help someone find the text to be summarized in the archives. These will be used for indexing!
-List only the most common 1-word keywords or 2-word key phrases
-that people are most likely to search for on the internet, when specifically looking for the content being summarized,
-you can use synonyms that are extremely common. The keywords must be in the same language as the source content.
+Inside the <keywords> section, output a **single line** with up to 50 comma-separated 1-word keywords or 2-word key phrases that would help someone find the text in an archive or search engine.
+
+Only include the most relevant and commonly searched terms, using synonyms or generalizations if needed. Prioritize relevance and common usage.
+
+The entire <keywords> section must not exceed 400 characters (including commas). Do not use newlines, bullet points, or any other formatting.
 HEREDOC;
+        
         $summaryInstructions = <<<HEREDOC
-Inside the summary section, and output a string less than 512 characters that accurately summarizes the content, in one single cohesive and easy-to-follow paragraph.
-In this string, avoid run-on sentences and multiple paragraphs, just make the summary accurate and succinct.
-When summarizing, please ignore any sentences that seem like they're part of an advertisement inserted inside the transcript.
-Do not refer to the speakers A, B, etc. directly, or the hosts.
-You should not refer to "the content", "the text", "the discussion", "the conversation" or anything meta like that.
-Just summarize the substance of what is being said by the speakers,
-as if it was a shorter version being said by one speaker. The summary should be comprehensive and fit in under 512 characters.
-HEREDOC;
+Inside the <summary> section, write a single paragraph (less than 512 characters) summarizing the **core ideas** expressed in the text.
 
+Avoid run-on sentences and do not use multiple paragraphs. Ignore any promotional or advertising content.
+
+Do not refer to "this conversation", "the content", or the names of hosts or speakers directly. Just express what was said, clearly and neutrally, as if paraphrasing it into a shorter version.
+HEREDOC;
+        
         $speakersInstructions = <<<HEREDOC
-Inside speakers section, put the exact string "no names" if you can't figure out who is speaking from the text, otherwise put a comma-separated list of speaker names deduced from the text.
-HEREDOC;
+Inside the <speakers> section, write either:
+- A comma-separated list of speaker names (if clearly identifiable in the text)
+- Or the exact string: no names
 
+Do not guess. If the speakers are not explicitly named, respond with "no names" exactly.
+HEREDOC;
+        
         $instructions = <<<HEREDOC
-You are a large language model that can summarize text, generate keywords for searching, and find out who's speaking.
-Output exactly three sections, each section consisting of exactly one line,
-and marked exactly like this example found between the === lines:
+You are a language model tasked with extracting structured summaries for indexing, using clearly labeled XML-style tags.
+
+Output **exactly three sections**:
+1. <keywords> one line, 400 characters max
+2. <summary> one paragraph, 512 characters max
+3. <speakers> either names or "no names"
+
+Follow this format exactly, without variation. Example:
 
 ===
 <keywords>
-keyword1, keyword2, ...
+keyword1, keyword2, keyword3, ...
 </keywords>
 
 <summary>
-your paragraph summary under 512 characters.
+This is the 1-paragraph summary of the main points from the text.
 </summary>
 
 <speakers>
@@ -81,16 +89,7 @@ Mark, Stephanie
 </speakers>
 ===
 
-I am including the text to be summarized after these instructions.
-Follow the instructions exactly. Do not include any bold headers. 
-
-$keywordsInstructions
-
-$summaryInstructions
-
-$speakersInstructions
-
-What follows is the text you need to summarize according to the instructions above:
+Now process the following text:
 
 $text
 HEREDOC;
