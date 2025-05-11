@@ -156,18 +156,27 @@ HEREDOC;
             : "a wide variety of synonyms, variations, alternate phrasing, related terms, abbreviations, and common search terms";
 
         $prompt = <<<HEREDOC
-You are helping build a high-quality search index. The following is a list of canonical keywords:
+You are expanding canonical search keywords into useful query terms for a search engine.
 
+Here is the input:
 $original
 
-Please expand this list into up to 1000 relevant, comma-separated search terms. Include $modeDescription that a human might search for when looking for content associated with the original keywords.
+Please output up to 1000 comma-separated search terms that people might use when looking for this content.
 
-Rules:
-- Output only one line of comma-separated strings
-- No duplicates
-- No phrases longer than 3 words
-- All terms should be relevant to searching
-- Do not use bullet points, JSON, or extra formatting
+Strict rules:
+- Only output one line.
+- Each term must be 1 or 2 words maximum. No more than 2 words.
+- No special characters, punctuation, or formatting.
+- No duplicates.
+- Do NOT include full sentences.
+- All terms must be highly relevant, not generic.
+- Think of synonyms, rephrasings, subtopics, and variations.
+- Imagine a smart autocomplete or tag system for searching.
+
+Example output:
+free talk, libertarian radio, bitcoin price, parking gender, bartering app, cryptocurrency tax, feminist activism
+
+Now output the expanded keyword line:
 HEREDOC;
 
         $messages = [
