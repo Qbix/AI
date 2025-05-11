@@ -42,14 +42,14 @@ class AI_LLM implements AI_LLM_Interface
             $options['max_tokens'] = 1000;
         }
         $keywordsInstructions = <<<HEREDOC
-On one line, please output 50 comma-separated entries consisting of 1-word keywords or 2-word key phrases,
-that would help someone find the text to be summarized in the archives. 
+Inside the keywords section, please output 50 comma-separated entries consisting of 1-word keywords or 2-word key phrases,
+that would help someone find the text to be summarized in the archives. These will be used for indexing!
 List only the most common 1-word keywords or 2-word key phrases
 that people are most likely to search for on the internet, when specifically looking for the content being summarized,
 you can use synonyms that are extremely common. The keywords must be in the same language as the source content.
 HEREDOC;
         $summaryInstructions = <<<HEREDOC
-Then output two newlines and output a string less than 512 characters that accurately summarizes the content, in one single cohesive and easy-to-follow paragraph.
+Inside the summary section, and output a string less than 512 characters that accurately summarizes the content, in one single cohesive and easy-to-follow paragraph.
 In this string, avoid run-on sentences and multiple paragraphs, just make the summary accurate and succinct.
 When summarizing, please ignore any sentences that seem like they're part of an advertisement inserted inside the transcript.
 Do not refer to the speakers A, B, etc. directly, or the hosts.
@@ -59,12 +59,28 @@ as if it was a shorter version being said by one speaker. The summary should be 
 HEREDOC;
 
         $speakersInstructions = <<<HEREDOC
-Then output two newlines, followed by a comma-separated list of speaker names, if they can be clearly deduced from the text, or the string "no names" if they cannot be deduced.
+Inside speakers section, put the exact string "no names" if you can't figure out who is speaking from the text, otherwise put a comma-separated list of speaker names deduced from the text.
 HEREDOC;
 
         $instructions = <<<HEREDOC
-I need you to summarize some text and output three lines separated by two newlines each.
-The first line should contain a list of keywords, the second line should contain a summary, and the third line should contain the speaker names.
+You are a large language model that can summarize text, generate keywords for searching, and find out who's speaking.
+Output exactly three sections, each section consisting of exactly one line,
+and marked exactly like this example found between the === lines:
+
+===
+<keywords>
+keyword1, keyword2, ...
+</keywords>
+
+<summary>
+your paragraph summary under 512 characters.
+</summary>
+
+<speakers>
+Mark, Stephanie
+</speakers>
+===
+
 I am including the text to be summarized after these instructions.
 Follow the instructions exactly. Do not include any bold headers. 
 
