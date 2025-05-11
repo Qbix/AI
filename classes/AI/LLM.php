@@ -35,31 +35,32 @@ class AI_LLM implements AI_LLM_Interface
     function summarize($text, $options = array())
     {
         $keywordsInstructions = <<<HEREDOC
-First, please output, on a line by itself without a header, a JSON array of the top 20
-keywords or extremely short key phrases, that would help someone find the text to be summarized
-in the archives. At the end of this list, on the same line, continue to add
-30-40 more comma-separated, short common keywords that people are most likely to search for
-on the internet, when specifically looking for this content, such as synonyms.
-Do not include bold headers. The keywords must be in the same language as the source content.
+Under "keywords" you have an array containing 50 strings that are 1-word keywords or 2-word key phrases, that would help someone find the text to be summarized
+in the archives. Please list only the most common 1-word keywords or 2-word key phrases
+that people are most likely to search for on the internet, when specifically looking for the content being summarized,
+you can use synonyms that are extremely common. The keywords must be in the same language as the source content.
 HEREDOC;
         $summaryInstructions = <<<HEREDOC
-After the JSON, make a newline, and then accurately summarize the content, in one single cohesive and easy-to-follow paragraph.
+Under "summary" is a string less than 512 characters that accurately summarizes the content, in one single cohesive and easy-to-follow paragraph.
 Avoid run-on sentences and multiple paragraphs, just make the summary accurate and succinct.
 When summarizing, please ignore any sentences that seem like they're part of an advertisement inserted inside the transcript.
 Do not refer to the speakers A, B, etc. directly, or the hosts.
 You should not refer to "the content", "the text", "the discussion", "the conversation" or anything meta like that.
 Just summarize the substance of what is being said by the speakers,
-as if it was a shorter version being said by one speaker.
+as if it was a shorter version being said by one speaker. The summary should be comprehensive and fit in under 512 characters.
 HEREDOC;
 
         $speakersInstructions = <<<HEREDOC
-Finally, if the text clearly says who the speakers are, please list their names as a JSON array.
-Otherwise, output an empty JSON array like [].
+Under "spakers" is an array contining the names of the speakers, if they can be clearly deduced from the text,
+otherwise it is an empty JSON array.
 HEREDOC;
 
         $instructions = <<<HEREDOC
-I am including some text after these instructions.
-Follow the instructions exactly.
+I need you to summarize some text and output a JSON structure.
+I am including the text to be summarized after these instructions.
+Follow the instructions exactly. Do not include any bold headers. 
+Please output JSON of a Javascript object with the keys "keywords", "summary", "speakers".
+
 $keywordsInstructions
 
 $summaryInstructions
