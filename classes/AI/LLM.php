@@ -50,6 +50,8 @@ The entire <keywords> section must not exceed 400 characters (including commas).
 HEREDOC;
         
         $summaryInstructions = <<<HEREDOC
+Inside the <title> section, write an accurate, descriptive title, comfortably under 200 characters, that can be shown in previews.
+
 Inside the <summary> section, write a single paragraph (less than 512 characters) summarizing the **core ideas** expressed in the text.
 
 Avoid run-on sentences and do not use multiple paragraphs. Ignore any promotional or advertising content.
@@ -76,13 +78,17 @@ Output **exactly three sections**:
 Follow this format exactly, without variation. Example:
 
 ===
-<keywords>
-keyword1, keyword2, keyword3, ...
-</keywords>
+<title>
+Title of the text, comfortably under 200 characters
+</title>
 
 <summary>
 This is the 1-paragraph summary of the main points from the text.
 </summary>
+
+<keywords>
+keyword1, keyword2, keyword3, ...
+</keywords>
 
 <speakers>
 name1, name2
@@ -111,20 +117,22 @@ HEREDOC;
         $content = preg_replace('/^```(?:json)?\s*|\s*```$/m', '', $content);
         
         // Extract content between tags
+        preg_match('/<title>(.*?)<\/title>/s', $content, $t);
         preg_match('/<keywords>(.*?)<\/keywords>/s', $content, $k);
         preg_match('/<summary>(.*?)<\/summary>/s', $content, $s);
         preg_match('/<speakers>(.*?)<\/speakers>/s', $content, $sp);
         
-        $keywordsString = trim($k[1] ?? '');
-        $summary = trim($s[1] ?? '');
-        $speakers = trim($sp[1] ?? '');
+        $titleString = trim(Q::ifset($t, 1, ''));
+        $keywordsString = trim(Q::ifset($k, 1, ''));
+        $summary = trim(Q::ifset($s, 1, ''));
+        $speakers = trim(Q::ifset($sp, 1, ''));
         
         $keywords = preg_split('/\s*,\s*/', $keywordsString);
         if (strtolower($speakers) === 'no names') {
             $speakers = '';
         }
         
-        return compact('keywords', 'summary', 'speakers');        
+        return compact('title', 'summary', 'keywords', 'speakers');        
     }
 
     /**
