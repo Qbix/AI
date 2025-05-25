@@ -37,7 +37,7 @@ function AI_discourse_post()
     }
 
     // create a user if one isn't already there
-    Q::event('Users/discourse/post', compact('baseUrl'));
+    Q::event('Users/discourse/post', compact('apiKey', 'userId', 'baseUrl'));
 
     // get the topic contents
     $uxt = (new Users_ExternalTo_Discourse(array(
