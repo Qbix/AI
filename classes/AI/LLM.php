@@ -50,8 +50,6 @@ The entire <keywords> section must not exceed 400 characters (including commas).
 HEREDOC;
         
         $summaryInstructions = <<<HEREDOC
-Inside the <title> section, write an accurate, descriptive title, comfortably under 200 characters, that can be shown in previews.
-
 Inside the <summary> section, write a single paragraph (less than 512 characters) summarizing the **core ideas** expressed in the text.
 
 Avoid run-on sentences and do not use multiple paragraphs. Ignore any promotional or advertising content.
@@ -79,16 +77,16 @@ Follow this format exactly, without variation. Example:
 
 ===
 <title>
-Title of the text, comfortably under 200 characters
+Generate a title for the text, comfortably under 200 characters
 </title>
-
-<summary>
-This is the 1-paragraph summary of the main points from the text.
-</summary>
 
 <keywords>
 keyword1, keyword2, keyword3, ...
 </keywords>
+
+<summary>
+This is the 1-paragraph summary of the main points from the text.
+</summary>
 
 <speakers>
 name1, name2
@@ -122,17 +120,16 @@ HEREDOC;
         preg_match('/<summary>(.*?)<\/summary>/s', $content, $s);
         preg_match('/<speakers>(.*?)<\/speakers>/s', $content, $sp);
         
-        $titleString = trim(Q::ifset($t, 1, ''));
-        $keywordsString = trim(Q::ifset($k, 1, ''));
-        $summary = trim(Q::ifset($s, 1, ''));
-        $speakers = trim(Q::ifset($sp, 1, ''));
-        
+        $title = trim(isset($t[1]) ? $t[1] : '');
+        $summary = trim(isset($s[1]) ? $s[1] : '');
+        $speakers = trim(isset($sp[1]) ? $sp[1] : '');
+        $keywordsString = trim($k[1] ?? '');
         $keywords = preg_split('/\s*,\s*/', $keywordsString);
         if (strtolower($speakers) === 'no names') {
             $speakers = '';
         }
         
-        return compact('title', 'summary', 'keywords', 'speakers');        
+        return compact('title', 'keywords', 'summary', 'speakers');        
     }
 
     /**
