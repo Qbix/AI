@@ -2,11 +2,6 @@
 
 interface AI_LLM_Interface
 {
-    function chatCompletions(array $messages, $options = array());
-}
-
-class AI_LLM implements AI_LLM_Interface
-{
     /**
      * @method chatCompletions
      * @param {array} messages An array of role => content, where role can be "system", "user", "assistant"
@@ -19,6 +14,11 @@ class AI_LLM implements AI_LLM_Interface
      * @param {integer} [$frequencyPenalty=2]
      * @return {array} Contains "errors" or "choices" keys
      */
+    function chatCompletions(array $messages, $options = array());
+}
+
+class AI_LLM implements AI_LLM_Interface
+{
     function chatCompletions(array $messages, $options = array())
     {
         // by default, return an empty array
