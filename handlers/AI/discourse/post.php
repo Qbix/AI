@@ -47,7 +47,8 @@ function AI_discourse_post()
     )))->retrieve();
     $uxt->setExtra(compact('baseUrl', 'apiKey'));
     $ret = $uxt->getTopic($topicUrl);
-    $input = substr($ret['post_stream']['posts'][$replyToPostIndex]['cooked'], 0, 1000);
+    $rawHtml = $ret['post_stream']['posts'][$replyToPostIndex]['cooked'];
+    $input   = Q_Html::toSimpleMarkdown($rawHtml, 1000);
     $topicTitle = $ret['title'];
     $username = $uxt->getExtra('username');
 
