@@ -52,22 +52,25 @@ function AI_discourse_post()
     $topicTitle = $ret['title'];
     $username = $uxt->getExtra('username');
 
+    $postOrComment = $replyToPostIndex ? 'comment' : 'post';
+    $byAuthor = isset($ret['post_stream']['name']) ? 'by ' . $ret['post_stream']['name'] : '';
+
     $languageClause = $languageName
         ? "Speak using $languageName language"
-        : 'Speak in the same language as the post';
+        : "Speak in the same language as the $postOrComment";
     
     // generate text completion using gpt-3.5-turbo
     // (currently 10x cheaper than gpt-3)
     $LLM = new AI_LLM_OpenAI();
     $instructions = array(
-        'agree + actionable' => "What follows is HTML of a post. Write one or two paragraphs expressing agreement with the post, without explicitly saying the words 'I agree'. Add interesting insights or ideas that can accomplish what is being discussed. The post: " . "\n" . $input,
-        'agree + emotive' => "What follows is HTML of a post. Write one paragraph expressing agreement with the post. Be enthusiastic and express emotion about the subject.\n$languageClause\nThe post:\n" . $input,
-        'agree + expand' => "What follows is HTML of a post. Write one sentence expressing general agreement (avoiding saying 'I agree'), but then two paragraphs discusing a much larger and more important vision everyone should consider.\n$languageClause\nThe post:\n" . $input,
-        'agree + changeSubject' => "What follows is HTML of a post. Write one sentence expressing general agreement (avoiding saying 'I agree'), but then two paragraphs discusing a related but different issue, and explain why it is more important. The post:\n" . $input,
-        'disagree + respectful' => "What follows is HTML of a post. Write two sentences explaining the best reasons to disagree with this post. Be very respectful but thorough.\n$languageClause\nThe post:\n" . $input,
-        'disagree + emotive' => "What follows is HTML of a post. Write two sentences explaining the best reasons to disagree with this post. Use spunky and emotional language, and be opinionated, citing well known aphorisms.\n$languageClause\nThe post:\n" . $input,
-        'disagree + absurd' => "What follows is HTML of a post. Write a paragraph in the style of an internet forum, disagreeing with it, by using sarcastic examples and analogies that show why what is being advocated can actually be absurd. Avoid overly formal language and structure, speak plainly and to the point.\n$languageClause\nThe post:\n" . $input,
-        'disagree + authority' => "What follows is HTML of a post. Write a single paragraph mildly disagreeing with it (without saying 'mildly disagree'), and naming other important authorities on the subject who also disagree, who haven't been mentioned yet, and summarizing their points. Avoid overly formal language and structure, speak plainly and to the point.\n$languageClause\nThe post:\n" . $input
+        'agree + actionable' => "What follows is HTML of a $postOrComment$byAuthor. Write one or two paragraphs expressing agreement with the post, without explicitly saying the words 'I agree'. Add interesting insights or ideas that can accomplish what is being discussed. The post: " . "\n" . $input,
+        'agree + emotive' => "What follows is HTML of a $postOrComment$byAuthor. Write one paragraph expressing agreement with the post. Be enthusiastic and express emotion about the subject.\n$languageClause\nThe post:\n" . $input,
+        'agree + expand' => "What follows is HTML of a $postOrComment$byAuthor. Write one sentence expressing general agreement (avoiding saying 'I agree'), but then two paragraphs discusing a much larger and more important vision everyone should consider.\n$languageClause\nThe post:\n" . $input,
+        'agree + changeSubject' => "What follows is HTML of a $postOrComment$byAuthor. Write one sentence expressing general agreement (avoiding saying 'I agree'), but then two paragraphs discusing a related but different issue, and explain why it is more important. The post:\n" . $input,
+        'disagree + respectful' => "What follows is HTML of a $postOrComment$byAuthor. Write two sentences explaining the best reasons to disagree with this post. Be very respectful but thorough.\n$languageClause\nThe post:\n" . $input,
+        'disagree + emotive' => "What follows is HTML of a $postOrComment$byAuthor. Write two sentences explaining the best reasons to disagree with this post. Use spunky and emotional language, and be opinionated, citing well known aphorisms.\n$languageClause\nThe post:\n" . $input,
+        'disagree + absurd' => "What follows is HTML of a $postOrComment$byAuthor. Write a paragraph in the style of an internet forum, disagreeing with it, by using sarcastic examples and analogies that show why what is being advocated can actually be absurd. Avoid overly formal language and structure, speak plainly and to the point.\n$languageClause\nThe post:\n" . $input,
+        'disagree + authority' => "What follows is HTML of a $postOrComment$byAuthor. Write a single paragraph mildly disagreeing with it (without saying 'mildly disagree'), and naming other important authorities on the subject who also disagree, who haven't been mentioned yet, and summarizing their points. Avoid overly formal language and structure, speak plainly and to the point.\n$languageClause\nThe post:\n" . $input
     );
 
     $messages = array(
