@@ -208,4 +208,52 @@ HEREDOC;
         return $expanded;
     }
 
+    /**
+     * Create an LLM adapter instance from a string or return an existing instance.
+     *
+     * @method create
+     * @static
+     * @param {String|Object} adapter Adapter name, FQCN, or instance
+     * @param {Object} [options] Optional constructor/options to pass to adapter
+     * @return {Object|null} Instance of adapter or null if not found
+     */
+    public static function create($adapter, $options = array())
+    {
+        if (empty($adapter)) {
+            return null;
+        }
+
+        // If already an instance, return it
+        if (is_object($adapter)) {
+            return $adapter;
+        }
+
+        // If full class name provided and exists, instantiate
+        if (is_string($adapter) && class_exists($adapter)) {
+            return new $adapter($options);
+        }
+
+        // Normalize adapter string to a class suffix:
+        // e.g. "openai" => "Openai" => "AI_LLM_Openai" ; "open-ai" or "open_ai" => "OpenAi"
+        $sanitized = preg_replace('/[^a-z0-9]+/i', ' ', (string)$adapter);
+        $suffix = str_replace(' ', '', ucwords(strtolower($sanitized)));
+
+        // Common naming convention: AI_LLM_<Adapter>
+        $className = "AI_LLM_{$suffix}";
+
+        if (class_exists($className)) {
+            return new $className($options);
+        }
+
+        // Try alternative: prefix without underscore (legacy variations)
+        $altClass = "AI_LLM_" . $suffix;
+        if (class_exists($altClass)) {
+            return new $altClass($options);
+        }
+
+        // Not found — rely on autoloader to load file by convention if needed,
+        // otherwise return null so caller can handle.
+        return null;
+    }
+
 }
