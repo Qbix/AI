@@ -75,6 +75,22 @@ class AI_Image_RemoveBG extends AI_Image implements AI_Image_Interface
 			return ['error' => 'HTTP or timeout error'];
 		}
 
+		// check if response is valid image and return error message if not
+		if (!@imagecreatefromstring($response)) {
+			$json = json_decode($response, true);
+			if (json_last_error() == JSON_ERROR_NONE && !empty($json['errors'])) {
+				$messages = [];
+				foreach ($json['errors'] as $error) {
+					$title = $error['title'] ?? 'Unknown';
+					$detail = $error['detail'] ?? '';
+					$messages[] = "$title: $detail";
+				}
+
+				return ['error' => implode(",\n", $messages)];
+			}
+			return ['error' => "unknown error"];
+		}
+
 		return ['data' => $response, 'format' => Q::ifset($options, 'format', 'png')];
 	}
 }
