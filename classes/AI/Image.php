@@ -17,7 +17,7 @@ interface AI_Image_Interface
 	 * @param {string} [$options.quality="standard"] The quality level, e.g. "standard" or "hd"
 	 * @return {array} Either ['url' => ...] or ['b64_json' => ...] or ['error' => ...]
 	 */
-	public function generate($prompt, $options = array());
+	public static function generate($prompt, $options = array());
 
 	/**
 	 * Removes the background from a base64-encoded image
@@ -26,7 +26,7 @@ interface AI_Image_Interface
 	 * @param {array} $options Optional settings
 	 * @return {array} Either ['b64_png' => ...] or ['url' => ...] or ['error' => ...]
 	 */
-	public function removeBackground($base64Image, $options = array());
+	public static function removeBackground($base64Image, $options = array());
 }
 
 /**
@@ -40,7 +40,7 @@ class AI_Image implements AI_Image_Interface
 	 * Default implementation of generate (does nothing)
 	 * @method generate
 	 */
-	public function generate($prompt, $options = array())
+	public static function generate($prompt, $options = array())
 	{
 		throw new Q_Exception_NotImplemented(array(
 			'functionality' => 'AI_Image::generate'
@@ -51,7 +51,7 @@ class AI_Image implements AI_Image_Interface
 	 * Default implementation of removeBackground (does nothing)
 	 * @method removeBackground
 	 */
-	public function removeBackground($base64Image, $options = array())
+	public static function removeBackground($base64Image, $options = array())
 	{
 		throw new Q_Exception_NotImplemented(array(
 			'functionality' => 'AI_Image::removeBackground'
