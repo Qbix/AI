@@ -65,7 +65,7 @@ class AI_Transcription implements AI_Transcription_Interface
         // Normalize adapter string to a class suffix:
         // e.g. "openai" => "Openai" => "AI_Transcription_Openai" ; "open-ai" or "open_ai" => "OpenAi"
         $sanitized = preg_replace('/[^a-z0-9]+/i', ' ', (string)$adapter);
-        $suffix = str_replace(' ', '', ucwords(strtolower($sanitized)));
+        $suffix = str_replace(' ', '', ucfirst($sanitized));
 
         // Common naming convention: AI_Transcription_<Adapter>
         $className = "AI_Transcription_{$suffix}";

@@ -236,7 +236,7 @@ HEREDOC;
         // Normalize adapter string to a class suffix:
         // e.g. "openai" => "Openai" => "AI_LLM_Openai" ; "open-ai" or "open_ai" => "OpenAi"
         $sanitized = preg_replace('/[^a-z0-9]+/i', ' ', (string)$adapter);
-        $suffix = str_replace(' ', '', ucwords(strtolower($sanitized)));
+        $suffix = str_replace(' ', '', ucwords($sanitized));
 
         // Common naming convention: AI_LLM_<Adapter>
         $className = "AI_LLM_{$suffix}";
