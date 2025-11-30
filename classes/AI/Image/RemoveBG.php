@@ -81,8 +81,8 @@ class AI_Image_RemoveBG extends AI_Image implements AI_Image_Interface
 			if (json_last_error() == JSON_ERROR_NONE && !empty($json['errors'])) {
 				$messages = [];
 				foreach ($json['errors'] as $error) {
-					$title = $error['title'] ?? 'Unknown';
-					$detail = $error['detail'] ?? '';
+					$title = isset($error['title']) ? $error['title'] : 'Unknown';
+					$detail = isset($error['detail']) ? $error['detail'] : '';
 					$messages[] = "$title: $detail";
 				}
 

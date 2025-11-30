@@ -41,8 +41,9 @@ class AI_Transcription_AWS extends AI_Transcription implements AI_Transcription_
         $data = json_decode($json, true);
         return [
             'status' => 'COMPLETED',
-            'text' => $data['results']['transcripts'][0]['transcript'] ?? '',
-            'words' => $data['results']['items'] ?? []
+            'text' => isset($data['results']['transcripts'][0]['transcript'])
+                ? $data['results']['transcripts'][0]['transcript'] : '',
+            'words' => isset($data['results']['items']) : $data['results']['items'] : array()
         ];
     }
 

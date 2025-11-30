@@ -123,7 +123,7 @@ HEREDOC;
         $title = trim(isset($t[1]) ? $t[1] : '');
         $summary = trim(isset($s[1]) ? $s[1] : '');
         $speakers = trim(isset($sp[1]) ? $sp[1] : '');
-        $keywordsString = trim($k[1] ?? '');
+        $keywordsString = trim(isset($k[1]) ? $k[1] : '');
         $keywords = preg_split('/\s*,\s*/', $keywordsString);
         if (strtolower($speakers) === 'no names') {
             $speakers = '';

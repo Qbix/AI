@@ -77,7 +77,8 @@ class AI_Transcription_OpenAI extends AI_Transcription implements AI_Transcripti
 
 			foreach ($curlHandles as $i => $ch) {
 				$res = curl_multi_getcontent($ch);
-				$results[$i] = Q::json_decode($res, true)['text'] ?? '';
+				$decoded = Q::json_decode($res, true);
+				$results[$i] = isset($decoded['text']) ? $decoded['text'] :  '';
 				curl_multi_remove_handle($mh, $ch);
 				curl_close($ch);
 			}
