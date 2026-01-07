@@ -80,7 +80,7 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 	 *
 	 * @method removeBackground
 	 * @static
-	 * @param {string} $base64Image Base64-encoded PNG/JPG (no data URI prefix)
+	 * @param {string} $image Binary or Base64-encoded PNG/JPG (no data URI prefix)
 	 * @param {array} $options Optional parameters:
 	 *   @param {string} [$options.model="stability.sd-remix"]
 	 *   @param {string} [$options.prompt="remove background"]
@@ -89,7 +89,7 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 	 *   @param {int} [$options.steps=40]
 	 * @return {array} ['data'=>binary,'format'=>string] or ['error'=>string]
 	 */
-	public static function removeBackground($base64Image, $options = [])
+	public static function removeBackground($image, $options = [])
 	{
 		$client  = self::getClient();
 		$modelId = Q::ifset($options, 'model', 'stability.sd-remix');
@@ -97,7 +97,7 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 		$format  = Q::ifset($options, 'format', 'png');
 
 		$payload = [
-			'image'         => $base64Image,
+			'image'         => Q_Utils::toBase64($image),
 			'mask_source'   => Q::ifset($options, 'mask_source', 'background'),
 			'text_prompts'  => [['text' => $prompt]],
 			'cfg_scale'     => 10,

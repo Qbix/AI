@@ -7,7 +7,7 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 	 * 
 	 * @method removeBackground
 	 * @static
-	 * @param {string} $base64Image Base64-encoded image string (no data URI prefix)
+	 * @param {string} $image Binary or Base64-encoded image string (no data URI prefix)
 	 * @param {array} $options Optional parameters:
 	 *   @param {string} [$options.backgroundImage] A background image as base64 or URL
 	 *   @param {string} [$options.backgroundColor] A solid background color (e.g. "#ffffff")
@@ -17,12 +17,12 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 	 *   @param {int} [$options.timeout=60] Request timeout in seconds
 	 * @return {array} Either ['data' => binary, 'format' => string] or ['error' => string]
 	 */
-	public static function removeBackground($base64Image, $options = [])
+	public static function removeBackground($image, $options = [])
 	{
 		$apiKey = Q_Config::expect('AI', 'hotpot', 'key');
 		$url = 'https://api.hotpot.ai/remove-background';
 
-		$image = base64_decode($base64Image);
+		$image = Q_Utils::toRawBinary($image);
 		if ($image === false) {
 			return ['error' => 'Invalid base64 image'];
 		}
