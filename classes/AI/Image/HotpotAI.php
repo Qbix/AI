@@ -11,20 +11,32 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 	 * @param {array} $options Optional parameters:
 	 *   @param {string} [$options.backgroundImage] A background image as base64 or URL
 	 *   @param {string} [$options.backgroundColor] A solid background color (e.g. "#ffffff")
-	 *   @param {bool} [$options.returnAlpha=true] Whether to return transparency
+	 *   @param {bool}   [$options.returnAlpha=true] Whether to return transparency
 	 *   @param {string} [$options.fileType="png"] File type of result (png, jpg, webp)
-	 *   @param {int} [$options.compressionFactor=100] Compression level (10–100)
-	 *   @param {int} [$options.timeout=60] Request timeout in seconds
+	 *   @param {int}    [$options.compressionFactor=100] Compression level (10–100)
+	 *   @param {int}    [$options.timeout=60] Request timeout in seconds
+	 *   @param {callable} [$options.callback] function ($result)
 	 * @return {array} Either ['data' => binary, 'format' => string] or ['error' => string]
 	 */
-	public static function removeBackground($image, $options = [])
+	public static function removeBackground($image, $options = array())
 	{
-		$apiKey = Q_Config::expect('AI', 'hotpot', 'key');
-		$url = 'https://api.hotpot.ai/remove-background';
+		$apiKey       = Q_Config::expect('AI', 'hotpot', 'key');
+		$url          = 'https://api.hotpot.ai/remove-background';
+		$userCallback = Q::ifset($options, 'callback', null);
+
+		$result = array(
+			'data'   => null,
+			'format' => Q::ifset($options, 'fileType', 'png'),
+			'error'  => null
+		);
 
 		$image = Q_Utils::toRawBinary($image);
 		if ($image === false) {
-			return ['error' => 'Invalid base64 image'];
+			$result['error'] = 'Invalid base64 image';
+			if ($userCallback && is_callable($userCallback)) {
+				call_user_func($userCallback, $result);
+			}
+			return array'error' => $result['error']);
 		}
 
 		$boundary = uniqid('hp');
@@ -61,17 +73,42 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 
 		$body .= "--$boundary--$eol";
 
-		$headers = [
+		$headers = array(
 			"Authorization: $apiKey",
 			"Content-Type: multipart/form-data; boundary=$boundary"
-		];
+		);
 
-		$resp = Q_Utils::post($url, $body, null, true, $headers, Q::ifset($options, 'timeout', 60));
+		$resp = Q_Utils::post(
+			$url,
+			$body,
+			null,
+			true,
+			$headers,
+			Q::ifset($options, 'timeout', 60)
+		);
+
 		if ($resp === false) {
-			return ['error' => 'HTTP or timeout error'];
+			$result['error'] = 'HTTP or timeout error';
+		} else {
+			$result['data'] = $resp;
 		}
 
-		return ['data' => $resp, 'format' => Q::ifset($options, 'fileType', 'png')];
+		if ($userCallback && is_callable($userCallback)) {
+			try {
+				call_user_func($userCallback, $result);
+			} catch (Exception $e) {
+				error_log($e);
+			}
+		}
+
+		if ($result['error']) {
+			return array('error' => $result['error']);
+		}
+
+		return array(
+			'data'   => $result['data'],
+			'format' => $result['format']
+		);
 	}
 
 	/**
@@ -84,21 +121,29 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 	 *   @param {string} [$options.styleId="default"] The style ID for the artwork
 	 *   @param {string} [$options.seedImage] A seed image URL to guide generation
 	 *   @param {string} [$options.negativePrompt] Text to avoid
-	 *   @param {float} [$options.promptStrength] Strength of prompt guidance
-	 *   @param {bool} [$options.isRandom] Whether to use random seed
-	 *   @param {bool} [$options.isTile] Whether to tile the image
-	 *   @param {int} [$options.timeout=60] Request timeout in seconds
+	 *   @param {float}  [$options.promptStrength] Strength of prompt guidance
+	 *   @param {bool}   [$options.isRandom] Whether to use random seed
+	 *   @param {bool}   [$options.isTile] Whether to tile the image
+	 *   @param {int}    [$options.timeout=60] Request timeout in seconds
+	 *   @param {callable} [$options.callback] function ($result)
 	 * @return {array} Either ['data' => binary, 'format' => 'png'] or ['error' => string]
 	 */
 	public static function generate($prompt, $options = [])
 	{
-		$apiKey = Q_Config::expect('AI', 'hotpot', 'key');
-		$url = 'https://api.hotpot.ai/make-art';
+		$apiKey       = Q_Config::expect('AI', 'hotpot', 'key');
+		$url          = 'https://api.hotpot.ai/make-art';
+		$userCallback = Q::ifset($options, 'callback', null);
 
-		$form = [
+		$result = array(
+			'data'   => null,
+			'format' => 'png',
+			'error'  => null
+		);
+
+		$form = array(
 			'inputText' => $prompt,
 			'styleId'   => Q::ifset($options, 'styleId', 'default'),
-		];
+		);
 
 		foreach (['seedImage','negativePrompt'] as $f) {
 			if (!empty($options[$f])) {
@@ -111,9 +156,9 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 			}
 		}
 
-		$headers = [
+		$headers = array(
 			"Authorization: $apiKey"
-		];
+		);
 
 		$boundary = uniqid('hotpot');
 		$eol = "\r\n";
@@ -127,11 +172,36 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 
 		$headers[] = "Content-Type: multipart/form-data; boundary=$boundary";
 
-		$resp = Q_Utils::post($url, $body, null, true, $headers, Q::ifset($options, 'timeout', 60));
+		$resp = Q_Utils::post(
+			$url,
+			$body,
+			null,
+			true,
+			$headers,
+			Q::ifset($options, 'timeout', 60)
+		);
+
 		if ($resp === false) {
-			return ['error' => 'HTTP or timeout error'];
+			$result['error'] = 'HTTP or timeout error';
+		} else {
+			$result['data'] = $resp;
 		}
 
-		return ['data' => $resp, 'format' => 'png'];
+		if ($userCallback && is_callable($userCallback)) {
+			try {
+				call_user_func($userCallback, $result);
+			} catch (Exception $e) {
+				error_log($e);
+			}
+		}
+
+		if ($result['error']) {
+			return array('error' => $result['error']);
+		}
+
+		return array(
+			'data'   => $result['data'],
+			'format' => 'png'
+		);
 	}
 }

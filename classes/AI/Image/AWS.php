@@ -37,41 +37,67 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 	 * @param {array} $options Optional parameters:
 	 *   @param {string} [$options.model="stability.stable-diffusion-xl-v0"]
 	 *   @param {string} [$options.size="1024x1024"]
-	 *   @param {int} [$options.steps=50]
+	 *   @param {int}    [$options.steps=50]
+	 *   @param {callable} [$options.callback] function ($result)
 	 * @return {array} ['b64_json'=>string] or ['error'=>string]
 	 */
-	public static function generate($prompt, $options = [])
+	public static function generate($prompt, $options = array())
 	{
-		$client  = self::getClient();
-		$modelId = Q::ifset($options, 'model', 'stability.stable-diffusion-xl-v0');
-		$size    = Q::ifset($options, 'size', '1024x1024');
+		$client       = self::getClient();
+		$modelId      = Q::ifset($options, 'model', 'stability.stable-diffusion-xl-v0');
+		$size         = Q::ifset($options, 'size', '1024x1024');
+		$steps        = Q::ifset($options, 'steps', 50);
+		$userCallback = Q::ifset($options, 'callback', null);
+
 		list($width, $height) = explode('x', $size);
+
+		$result = [
+			'b64_json' => null,
+			'error'    => null
+		];
 
 		$payload = [
 			'text_prompts' => [['text' => $prompt]],
 			'cfg_scale'    => 10,
-			'steps'        => Q::ifset($options, 'steps', 50),
+			'steps'        => $steps,
 			'seed'         => rand(0, 1000000),
 			'width'        => (int) $width,
 			'height'       => (int) $height,
 		];
 
 		try {
-			$result = $client->invokeModel([
+			$invokeResult = $client->invokeModel([
 				'modelId'     => $modelId,
 				'body'        => json_encode($payload),
 				'contentType' => 'application/json',
 				'accept'      => 'application/json',
 			]);
 
-			$response = json_decode($result['body']->getContents(), true);
+			$response = json_decode($invokeResult['body']->getContents(), true);
+
 			if (!empty($response['artifacts'][0]['base64'])) {
-				return ['b64_json' => $response['artifacts'][0]['base64']];
+				$result['b64_json'] = $response['artifacts'][0]['base64'];
+			} else {
+				$result['error'] = json_encode($response);
 			}
-			return ['error' => json_encode($response)];
 		} catch (Exception $e) {
-			return ['error' => $e->getMessage()];
+			$result['error'] = $e->getMessage();
 		}
+
+		// Invoke user callback if provided
+		if ($userCallback && is_callable($userCallback)) {
+			try {
+				call_user_func($userCallback, $result);
+			} catch (Exception $e) {
+				error_log($e);
+			}
+		}
+
+		if ($result['error']) {
+			return ['error' => $result['error']];
+		}
+
+		return ['b64_json' => $result['b64_json']];
 	}
 
 	/**
@@ -86,45 +112,75 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 	 *   @param {string} [$options.prompt="remove background"]
 	 *   @param {string} [$options.mask_source="background"]
 	 *   @param {string} [$options.format="png"]
-	 *   @param {int} [$options.steps=40]
+	 *   @param {int}    [$options.steps=40]
+	 *   @param {callable} [$options.callback] function ($result)
 	 * @return {array} ['data'=>binary,'format'=>string] or ['error'=>string]
 	 */
-	public static function removeBackground($image, $options = [])
+	public static function removeBackground($image, $options = array())
 	{
-		$client  = self::getClient();
-		$modelId = Q::ifset($options, 'model', 'stability.sd-remix');
-		$prompt  = Q::ifset($options, 'prompt', 'remove background');
-		$format  = Q::ifset($options, 'format', 'png');
+		$client       = self::getClient();
+		$modelId      = Q::ifset($options, 'model', 'stability.sd-remix');
+		$prompt       = Q::ifset($options, 'prompt', 'remove background');
+		$format       = Q::ifset($options, 'format', 'png');
+		$steps        = Q::ifset($options, 'steps', 40);
+		$userCallback = Q::ifset($options, 'callback', null);
+
+		$result = [
+			'data'   => null,
+			'format' => $format,
+			'error'  => null
+		];
 
 		$payload = [
 			'image'         => Q_Utils::toBase64($image),
 			'mask_source'   => Q::ifset($options, 'mask_source', 'background'),
 			'text_prompts'  => [['text' => $prompt]],
 			'cfg_scale'     => 10,
-			'steps'         => Q::ifset($options, 'steps', 40),
+			'steps'         => $steps,
 			'seed'          => rand(0, 1000000),
 			'output_format' => $format
 		];
 
 		try {
-			$result = $client->invokeModel([
+			$invokeResult = $client->invokeModel([
 				'modelId'     => $modelId,
 				'body'        => json_encode($payload),
 				'contentType' => 'application/json',
 				'accept'      => 'application/json',
 			]);
 
-			$response = json_decode($result['body']->getContents(), true);
+			$response = json_decode($invokeResult['body']->getContents(), true);
+
 			if (!empty($response['artifacts'][0]['base64'])) {
 				$data = base64_decode($response['artifacts'][0]['base64']);
 				if ($data === false) {
-					return ['error' => 'Invalid base64 output'];
+					$result['error'] = 'Invalid base64 output';
+				} else {
+					$result['data'] = $data;
 				}
-				return ['data' => $data, 'format' => $format];
+			} else {
+				$result['error'] = json_encode($response);
 			}
-			return ['error' => json_encode($response)];
 		} catch (Exception $e) {
-			return ['error' => $e->getMessage()];
+			$result['error'] = $e->getMessage();
 		}
+
+		// Invoke user callback if provided
+		if ($userCallback && is_callable($userCallback)) {
+			try {
+				call_user_func($userCallback, $result);
+			} catch (Exception $e) {
+				error_log($e);
+			}
+		}
+
+		if ($result['error']) {
+			return ['error' => $result['error']];
+		}
+
+		return array(
+			'data'   => $result['data'],
+			'format' => $format
+		);
 	}
 }

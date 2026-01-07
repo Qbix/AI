@@ -5,168 +5,178 @@ class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
 	/**
 	 * Generate an image via OpenAI Images API.
 	 *
-	 * Supported options (aligned with Google adapter):
-	 * - photos: array of binary image strings (optional, first used as base image)
+	 * Supported options:
+	 * - images: array of binary/base64/data-URI images (optional, ONLY FIRST USED)
+	 * - model: string (default gpt-image-1)
 	 * - format: png|jpg|webp
 	 * - width: int
 	 * - height: int
 	 * - size: "1024x1024" (overrides width/height)
-	 * - quality: standard|hd
+	 * - quality: standard|hd (mapped to auto|high)
 	 * - timeout: int (seconds)
+	 * - callback: callable (optional) function ($result)
 	 *
 	 * @param string $prompt
 	 * @param array  $options
-	 * @return array ['data' => binary, 'format' => string] or ['error' => string]
+	 * @return array ['data' => binary, 'format' => string] or ['error' => mixed]
 	 */
 	public static function generate($prompt, $options = array())
 	{
 		$apiKey = Q_Config::expect('AI', 'openAI', 'key');
-		$endpoint = 'https://api.openai.com/v1/images/generations';
 
-		// --- Normalize size handling ---
+		$model   = Q::ifset($options, 'model', 'gpt-image-1');
+		$format  = Q::ifset($options, 'format', 'png');
+		$timeout = Q::ifset($options, 'timeout', 60);
+
+		$userCallback = Q::ifset($options, 'callback', null);
+
+		// --- Size normalization ---
 		if (!empty($options['size']) && preg_match('/^(\d+)x(\d+)$/', $options['size'], $m)) {
-			$width  = (int)$m[1];
-			$height = (int)$m[2];
+			$size = $options['size'];
 		} else {
-			$width  = Q::ifset($options, 'width', 1024);
-			$height = Q::ifset($options, 'height', 1024);
+			$w = Q::ifset($options, 'width', 1024);
+			$h = Q::ifset($options, 'height', 1024);
+			$size = "{$w}x{$h}";
 		}
-		$size = "{$width}x{$height}";
 
-		// --- Base fields ---
-		$postFields = array(
-			'prompt' => $prompt,
-			'model'  => Q::ifset($options, 'model', 'gpt-image-1'),
-			'size'   => $size,
-			'quality'=> Q::ifset($options, 'quality', 'standard'),
-			'n'      => 1
+		$images   = Q::ifset($options, 'images', array());
+		$useImage = is_array($images) && !empty($images);
+
+		// Result container (shared for batch & non-batch)
+		$result = array(
+			'data'   => null,
+			'format' => $format,
+			'error'  => null
 		);
 
-		$headers = array(
-			"Authorization: Bearer $apiKey"
-		);
+		// Shared response handler
+		$callback = function ($response) use (&$result, $userCallback) {
 
-		// --- Reference image support (OpenAI: single base image only) ---
-		$tmpFiles = array();
-		$photos = Q::ifset($options, 'photos', array());
-
-		if (is_array($photos) && !empty($photos)) {
-			$binary = reset($photos);
-			if (is_string($binary)) {
-				$tmp = tempnam(sys_get_temp_dir(), 'ai_img_');
-				file_put_contents($tmp, Q_Utils::toRawBinary($binary));
-				$postFields['image'] = new CURLFile($tmp, 'image/png');
-				$tmpFiles[] = $tmp;
-
-				// Switch endpoint to edits when base image is provided
-				$endpoint = 'https://api.openai.com/v1/images/edits';
+			if ($response === false || $response === null) {
+				$result['error'] = 'OpenAI API unreachable';
+			} else {
+				$data = json_decode($response, true);
+				if (!is_array($data) || empty($data['data'][0]['b64_json'])) {
+					$result['error'] = $data;
+				} else {
+					$binary = base64_decode($data['data'][0]['b64_json']);
+					if ($binary === false) {
+						$result['error'] = 'Failed to decode image data';
+					} else {
+						$result['data'] = $binary;
+					}
+				}
 			}
+
+			// Invoke user callback if provided
+			if ($userCallback && is_callable($userCallback)) {
+				try {
+					call_user_func($userCallback, $result);
+				} catch (Exception $e) {
+					error_log($e);
+				}
+			}
+		};
+
+		// -------------------------------
+		// TEXT-ONLY GENERATION (JSON)
+		// -------------------------------
+		if (!$useImage) {
+
+			$qualityMap = array(
+				'standard' => 'auto',
+				'hd'       => 'high'
+			);
+			$q = Q::ifset($options, 'quality', 'auto');
+			$quality = Q::ifset($qualityMap, $q, $q);
+
+			$payload = array(
+				'model'   => $model,
+				'prompt'  => $prompt,
+				'size'    => $size,
+				'quality' => $quality,
+				'n'       => 1
+			);
+
+			$response = Q_Utils::post(
+				'https://api.openai.com/v1/images/generations',
+				json_encode($payload),
+				null,
+				false,
+				array(
+					"Authorization: Bearer $apiKey",
+					"Content-Type: application/json"
+				),
+				$timeout,
+				$callback
+			);
 		}
 
-		// --- Execute request ---
-		$response = Q_Utils::post(
-			$endpoint,
-			$postFields,
-			null,
-			true,
-			$headers,
-			Q::ifset($options, 'timeout', 60)
-		);
+		// -------------------------------
+		// IMAGE-BASED GENERATION (MULTIPART)
+		// -------------------------------
+		else {
+			$raw = Q_Utils::toRawBinary(reset($images));
+			if ($raw === false) {
+				return array('error' => 'Invalid image input');
+			}
 
-		// Cleanup temp files
-		foreach ($tmpFiles as $tmp) {
+			$tmp = tempnam(sys_get_temp_dir(), 'ai_img_');
+			file_put_contents($tmp, $raw);
+
+			$postFields = array(
+				'model'  => $model,
+				'prompt' => $prompt,
+				'image'  => new CURLFile($tmp, 'image/png'),
+				'size'   => $size,
+				'n'      => 1
+			);
+
+			$response = Q_Utils::post(
+				'https://api.openai.com/v1/images/edits',
+				$postFields,
+				null,
+				true,
+				array(
+					"Authorization: Bearer $apiKey"
+				),
+				$timeout,
+				$callback
+			);
+
 			@unlink($tmp);
 		}
 
-		if ($response === false) {
-			return array('error' => 'OpenAI API unreachable');
+		// -------------------------------
+		// Batch vs non-batch return
+		// -------------------------------
+		if (is_int($response)) {
+			// Batch mode: callback will populate $result later
+			return $result;
 		}
 
-		$data = json_decode($response, true);
-		if (empty($data['data'][0]['b64_json'])) {
-			return array('error' => $data);
+		// Non-batch: callback already executed
+		if ($result['error']) {
+			return array('error' => $result['error']);
 		}
 
-		$binary = base64_decode($data['data'][0]['b64_json']);
-		if (!$binary) {
-			return array('error' => 'Failed to decode image data');
-		}
-
-		$format = Q::ifset($options, 'format', 'png');
-
-		return array(
-			'data'   => $binary,
-			'format' => $format
-		);
+		return $result;
 	}
 
-    /**
-     * Removes the background from an image using OpenAI Images API.
-     *
-     * @method removeBackground
-     * @static
-     * @param {string} $image Raw binary, base64, or data URI
-     * @param {array} $options Optional parameters:
-     *   @param {string} [$options.prompt="remove background"]
-     *   @param {string} [$options.format="png"]
-     *   @param {int}    [$options.timeout=60]
-     * @return {array} ['data'=>binary,'format'=>string] or ['error'=>string]
-     */
-    public static function removeBackground($image, $options = array())
-    {
-        $apiKey   = Q_Config::expect('AI', 'openAI', 'key');
-        $endpoint = 'https://api.openai.com/v1/images/edits';
-        $prompt   = Q::ifset($options, 'prompt', 'remove background');
-        $format   = Q::ifset($options, 'format', 'png');
+	/**
+	 * Remove background using OpenAI image edits.
+	 *
+	 * @method removeBackground
+	 * @static
+	 * @param {string} $image Raw binary, base64, or data URI
+	 * @param {array}  $options
+	 * @return {array}
+	 */
+	public static function removeBackground($image, $options = array())
+	{
+		$options['images'] = array($image);
+		$options['prompt'] = Q::ifset($options, 'prompt', 'remove background');
 
-        $raw = Q_Utils::toRawBinary($image);
-        if ($raw === false) {
-            return array('error' => 'Invalid image input');
-        }
-
-        $tmp = tempnam(sys_get_temp_dir(), 'ai_img_');
-        file_put_contents($tmp, $raw);
-
-        $postFields = array(
-            'model'  => Q::ifset($options, 'model', 'gpt-image-1'),
-            'prompt' => $prompt,
-            'image'  => new CURLFile($tmp, 'image/png'),
-            'n'      => 1
-        );
-
-        $headers = array(
-            "Authorization: Bearer $apiKey"
-        );
-
-        $response = Q_Utils::post(
-            $endpoint,
-            $postFields,
-            null,
-            true,
-            $headers,
-            Q::ifset($options, 'timeout', 60)
-        );
-
-        @unlink($tmp);
-
-        if ($response === false) {
-            return array('error' => 'OpenAI API unreachable');
-        }
-
-        $data = json_decode($response, true);
-        if (empty($data['data'][0]['b64_json'])) {
-            return array('error' => $data);
-        }
-
-        $binary = base64_decode($data['data'][0]['b64_json']);
-        if ($binary === false) {
-            return array('error' => 'Failed to decode image data');
-        }
-
-        return array(
-            'data'   => $binary,
-            'format' => $format
-        );
-    }
-
+		return self::generate($options['prompt'], $options);
+	}
 }
