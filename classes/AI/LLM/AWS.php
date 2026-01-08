@@ -2,48 +2,11 @@
 
 use Aws\BedrockRuntime\BedrockRuntimeClient;
 
-/**
- * AWS Bedrock LLM adapter.
- *
- * Provides chat completion functionality via Anthropic models hosted on
- * AWS Bedrock.
- *
- * This adapter is transport-only:
- * - It serializes normalized messages
- * - Invokes Bedrock
- * - Returns the decoded response structure
- *
- * It MUST NOT:
- * - Extract text or JSON payloads
- * - Apply policies or accumulation
- *
- * @class AI_LLM_AWS
- * @extends AI_LLM
- * @implements AI_LLM_Interface
- */
 class AI_LLM_AWS extends AI_LLM implements AI_LLM_Interface
 {
-	/**
-	 * @property client
-	 * @type BedrockRuntimeClient
-	 * @protected
-	 */
 	protected $client;
-
-	/**
-	 * @property modelId
-	 * @type string
-	 * @protected
-	 */
 	protected $modelId;
 
-	/**
-	 * Constructor.
-	 *
-	 * Initializes the AWS Bedrock runtime client and model ID.
-	 *
-	 * @method __construct
-	 */
 	function __construct()
 	{
 		$this->client = new BedrockRuntimeClient(array(
@@ -59,33 +22,38 @@ class AI_LLM_AWS extends AI_LLM implements AI_LLM_Interface
 		);
 	}
 
-	/**
-	 * Creates a chat completion using AWS Bedrock (Anthropic).
-	 *
-	 * Supported options:
-	 * - max_tokens
-	 * - temperature
-	 * - callback (batch-safe)
-	 *
-	 * @method chatCompletions
-	 * @param {array} $messages Normalized role => content structure
-	 * @param {array} $options Optional parameters
-	 * @return {array} Decoded Bedrock response or error structure
-	 */
 	function chatCompletions(array $messages, $options = array())
 	{
-		$userCallback = Q::ifset($options, 'callback', null);
+		$userCallback   = Q::ifset($options, 'callback', null);
+		$responseFormat = Q::ifset($options, 'response_format', null);
+		$schema         = Q::ifset($options, 'json_schema', null);
 
-		/**
-		 * Convert normalized messages into Anthropic prompt format.
-		 *
-		 * Bedrock (Anthropic) does not yet support OpenAI-style message arrays,
-		 * so we linearize content blocks conservatively.
-		 */
 		$prompt = '';
+
+		/* ---------- Schema / JSON instructions (prompt-level only) ---------- */
+
+		if ($responseFormat === 'json_schema' && is_array($schema)) {
+			$prompt .=
+				"You are a strict JSON generator.\n" .
+				"Output MUST be valid JSON and MUST conform exactly to this JSON Schema:\n\n" .
+				json_encode($schema, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) .
+				"\n\n" .
+				"Rules:\n" .
+				"- Output JSON only\n" .
+				"- Do not include prose, comments, or markdown outside the JSON\n" .
+				"- Do not omit required fields\n" .
+				"- Use null when a value is unknown\n\n";
+		} elseif ($responseFormat === 'json') {
+			$prompt .=
+				"You are a strict JSON generator.\n" .
+				"Output MUST be valid JSON.\n" .
+				"Do not include prose, comments, or markdown outside the JSON.\n\n";
+		}
+
+		/* ---------- Convert normalized messages ---------- */
+
 		foreach ($messages as $role => $content) {
 			if ($role === 'system') {
-				// System prompt is prepended implicitly
 				$prompt .= $content . "\n\n";
 				continue;
 			}
@@ -104,14 +72,12 @@ class AI_LLM_AWS extends AI_LLM implements AI_LLM_Interface
 							break;
 
 						case 'image_url':
-							// Bedrock Anthropic does NOT support images yet.
-							// Explicitly ignore but preserve determinism.
+							// Claude via Bedrock has no vision support
 							$prompt .= "[Image omitted]\n";
 							break;
 					}
 				}
 			} else {
-				// Fallback: treat as plain text
 				$prompt .= (string)$content . "\n";
 			}
 
@@ -153,7 +119,6 @@ class AI_LLM_AWS extends AI_LLM implements AI_LLM_Interface
 			$result['error'] = $e->getMessage();
 		}
 
-		// Optional batch-safe callback
 		if ($userCallback && is_callable($userCallback)) {
 			try {
 				call_user_func($userCallback, $result);
