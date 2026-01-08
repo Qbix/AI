@@ -18,7 +18,7 @@ class AI_Image_RemoveBG extends AI_Image implements AI_Image_Interface
 	 *   @param {callable} [$options.callback] function ($result)
 	 * @return {array} Either ['data' => binary, 'format' => string] or ['error' => string]
 	 */
-	public static function removeBackground($base64Image, $options = array())
+	public function removeBackground($base64Image, $options = array())
 	{
 		$apiKey       = Q_Config::expect('AI', 'removeBG', 'key');
 		$url          = 'https://api.remove.bg/v1.0/removebg';

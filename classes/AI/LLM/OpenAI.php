@@ -64,27 +64,24 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
 		);
 
 		// Shared response handler
-		$callback = function ($response) use (&$result, $userCallback) {
+        $callback = function ($indexOrHandle, $response) use (&$result, $userCallback) {
 
-			if ($response === false || $response === null) {
-				$result['error'] = 'OpenAI API unreachable';
-			} else {
-				$decoded = json_decode($response, true);
-				if ($decoded === null) {
-					$result['error'] = 'Invalid JSON response from OpenAI';
-				} else {
-					$result['data'] = $decoded;
-				}
-			}
+            if (!is_string($response) || $response === '') {
+                $result['error'] = 'Empty or invalid response';
+            } else {
+                $data = json_decode($response, true);
+                if (is_array($data)) {
+                    $result['data'] = $data;
+                } else {
+                    $result['error'] = 'Invalid JSON from OpenAI';
+                }
+            }
 
-			if ($userCallback && is_callable($userCallback)) {
-				try {
-					call_user_func($userCallback, $result['data'] ? $result['data'] : array('error' => $result['error']));
-				} catch (Exception $e) {
-					error_log($e);
-				}
-			}
-		};
+            if ($userCallback) {
+                $userCallback($result);
+            }
+        };
+
 
 		$json = Q_Utils::post(
 			'https://api.openai.com/v1/chat/completions',

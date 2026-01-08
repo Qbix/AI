@@ -19,11 +19,86 @@ interface AI_LLM_Interface
 
 class AI_LLM implements AI_LLM_Interface
 {
+    /**
+     * Execute a chat-style completion against the underlying model provider.
+     *
+     * This method is intended to be implemented by concrete adapters
+     * (e.g. OpenAI, Anthropic, local models, etc.).
+     *
+     * The base implementation returns an empty array and should be
+     * overridden by subclasses.
+     *
+     * Implementations SHOULD:
+     *  - serialize messages according to the provider API
+     *  - perform authentication and transport
+     *  - return the decoded response as an associative array
+     *
+     * They MUST NOT:
+     *  - interpret semantic meaning
+     *  - extract text or JSON payloads
+     *  - apply policies or accumulation
+     *
+     * @method chatCompletions
+     * @param {array} $messages
+     *   Normalized message structure, typically:
+     *   {
+     *     system: string,
+     *     user: array<array>  // multimodal content blocks
+     *   }
+     * @param {array} [$options]
+     *   Optional provider-specific options, such as:
+     *   - model
+     *   - temperature
+     *   - response_format
+     *   - timeout
+     * @return {array}
+     *   Decoded model response structure.
+     */
     function chatCompletions(array $messages, $options = array())
     {
-        // by default, return an empty array
+        // Base implementation: no-op
         return array();
     }
+
+    /**
+     * Invoke the underlying model using a normalized prompt and inputs.
+     *
+     * This method performs provider-agnostic orchestration:
+     *  - builds normalized messages
+     *  - delegates execution to chatCompletions()
+     *
+     * The returned value MUST be a decoded response array, which will
+     * later be interpreted by extractModelPayload().
+     *
+     * @method callModel
+     * @protected
+     * @param {string} $prompt
+     *   Fully constructed system prompt.
+     * @param {array} $inputs
+     *   Multimodal inputs, such as:
+     *   {
+     *     text: string,
+     *     images: array<binary>
+     *   }
+     * @return {string}
+     *   Decoded model response.
+     * @throws {Exception}
+     */
+    protected function callModel($prompt, array $inputs)
+    {
+        $messages = $this->buildMessages($prompt, $inputs);
+
+        $response = $this->chatCompletions($messages, array(
+            'response_format' => 'json'
+        ));
+
+        if (!is_array($response)) {
+            throw new Exception("Model did not return a structured response");
+        }
+
+        return $this->extractModelPayload($response);
+    }
+
 
     /**
      * Can be used to summarize the text, generate keywords for searching, and find out who's speaking.
@@ -208,6 +283,76 @@ HEREDOC;
         return $expanded;
     }
 
+	/**
+	 * Process multimodal inputs through observation evaluation.
+	 *
+	 * Exactly ONE model call is made.
+	 * The model produces ONLY per-artifact observations.
+	 *
+	 * @method process
+	 * @param {array} $inputs
+	 *   Arbitrary multimodal inputs. Examples:
+	 *   {
+	 *     text: string,
+	 *     images: array<binary>,
+	 *     pdfs: array<binary>,
+	 *     artifacts: array<mixed>
+	 *   }
+	 * @param {array} $observations
+	 *   observationName => {
+	 *     promptClause: string,
+	 *     fieldNames: array<string>,
+	 *     example?: array<string,mixed>
+	 *   }
+	 * @param {array} [$interpolate]
+	 *   Optional placeholder map passed to Q::interpolate()
+	 * @return {array}
+	 *   Observation JSON emitted by the model.
+	 * @throws {Exception}
+	 */
+	public function process(array $inputs, array $observations, array $interpolate = array())
+	{
+		if (empty($observations)) {
+			throw new Exception("Nothing to process: no observations defined");
+		}
+
+		$o = self::promptFromObservations($observations);
+
+		if (empty($o['clauses'])) {
+			throw new Exception("No valid observation clauses generated");
+		}
+
+		$prompt =
+			"You are an automated semantic processor.\n\n" .
+			"Rules:\n" .
+			"- Output MUST be valid JSON\n" .
+			"- Do not include comments or prose\n" .
+			"- Do not omit fields\n" .
+			"- Use null when uncertain\n" .
+			"- Arrays must respect stated limits\n" .
+			"- Numeric values must be within stated ranges\n" .
+			"- If uncertainty is high for any field, lower the confidence score accordingly\n\n" .
+			"Inputs are referenced ONLY by the names provided in the text.\n" .
+			"Do not infer meaning from order, index, or file type.\n\n" .
+			"OBSERVATIONS:\n" . implode("\n", $o['clauses']) . "\n\n" .
+			"Return ONLY valid JSON matching this schema exactly:\n" .
+			json_encode($o['schema'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+		if (!empty($interpolate)) {
+			$prompt = Q::interpolate($prompt, $interpolate);
+		}
+
+		$response = $this->callModel($prompt, $inputs);
+
+		$data = json_decode($response, true);
+		if (!is_array($data)) {
+			throw new Exception("Model did not return valid JSON");
+		}
+
+		return $data;
+	}
+
+
     /**
      * Create an LLM adapter instance from a string or return an existing instance.
      *
@@ -255,5 +400,117 @@ HEREDOC;
         // otherwise return null so caller can handle.
         return null;
     }
+
+	/**
+	 * Build prompt clauses and JSON schema from observation definitions.
+	 *
+	 * Observations are local, per-artifact evaluators.
+	 *
+	 * @method promptFromObservations
+	 * @static
+	 * @protected
+	 * @param {array} $observations
+	 *   observationName => {
+	 *     promptClause: string,
+	 *     fieldNames: array<string>,
+	 *     example?: array<string,mixed>
+	 *   }
+	 * @return {array}
+	 *   {
+	 *     clauses: array<string>,
+	 *     schema: object
+	 *   }
+	 */
+	static function promptFromObservations(array $observations)
+	{
+		$clauses = array();
+		$schema  = array();
+
+		foreach ($observations as $name => $o) {
+			if (empty($o['promptClause']) || empty($o['fieldNames'])) {
+				continue;
+			}
+
+			$clauses[] = "- {$o['promptClause']}";
+
+			if (!isset($schema[$name])) {
+				$schema[$name] = array();
+			}
+
+			foreach ($o['fieldNames'] as $field) {
+				if (isset($o['example']) && array_key_exists($field, $o['example'])) {
+					$schema[$name][$field] = $o['example'][$field];
+				} else {
+					$schema[$name][$field] = null;
+				}
+			}
+		}
+
+		return array(
+			'clauses' => $clauses,
+			'schema'  => $schema
+		);
+	}
+
+    /**
+     * Extract semantic string payload from a model response.
+     *
+     * Supports text-based responses and base64-encoded JSON payloads.
+     *
+     * @method extractModelPayload
+     * @protected
+     * @param {array} $response
+     * @return {string}
+     * @throws {Exception}
+     */
+    protected function extractModelPayload(array $response)
+    {
+        // Case 1: base64 JSON payload (highest priority)
+        if (!empty($response['data'][0]['b64_json'])) {
+            $decoded = base64_decode($response['data'][0]['b64_json'], true);
+            if ($decoded === false || $decoded === '') {
+                throw new Exception("Failed to decode b64_json payload");
+            }
+            return $decoded;
+        }
+
+        // Case 2: chat completion text
+        if (!empty($response['choices'][0]['message']['content'])) {
+            return $response['choices'][0]['message']['content'];
+        }
+
+        throw new Exception("No usable payload found in model response");
+    }
+
+    protected function buildMessages($prompt, array $inputs)
+    {
+        $messages = array(
+            'system' => $prompt
+        );
+
+        $userContent = array();
+
+        if (!empty($inputs['text'])) {
+            $userContent[] = array(
+                'type' => 'text',
+                'text' => $inputs['text']
+            );
+        }
+
+        if (!empty($inputs['images'])) {
+            foreach ($inputs['images'] as $image) {
+                $userContent[] = array(
+                    'type' => 'image_url',
+                    'image_url' => array(
+                        'url' => 'data:image/png;base64,' . base64_encode($image)
+                    )
+                );
+            }
+        }
+
+        $messages['user'] = $userContent;
+        return $messages;
+    }
+
 
 }

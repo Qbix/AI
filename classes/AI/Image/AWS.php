@@ -5,30 +5,6 @@ use Aws\BedrockRuntime\BedrockRuntimeClient;
 class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 {
 	/**
-	 * Cached Bedrock client
-	 * @return BedrockRuntimeClient
-	 */
-	protected static function getClient()
-	{
-		static $client = null;
-		if (!$client) {
-			$key    = Q_Config::expect('AI', 'aws', 'key');
-			$secret = Q_Config::expect('AI', 'aws', 'secret');
-			$region = Q_Config::get('AI', 'aws', 'region', 'us-east-1');
-
-			$client = new BedrockRuntimeClient([
-				'region'      => $region,
-				'version'     => 'latest',
-				'credentials' => [
-					'key'    => $key,
-					'secret' => $secret,
-				],
-			]);
-		}
-		return $client;
-	}
-
-	/**
 	 * Generates an image from a text prompt using AWS Bedrock.
 	 *
 	 * @method generate
@@ -41,9 +17,9 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 	 *   @param {callable} [$options.callback] function ($result)
 	 * @return {array} ['b64_json'=>string] or ['error'=>string]
 	 */
-	public static function generate($prompt, $options = array())
+	public function generate($prompt, $options = array())
 	{
-		$client       = self::getClient();
+		$client       = $this->getClient();
 		$modelId      = Q::ifset($options, 'model', 'stability.stable-diffusion-xl-v0');
 		$size         = Q::ifset($options, 'size', '1024x1024');
 		$steps        = Q::ifset($options, 'steps', 50);
@@ -116,9 +92,9 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 	 *   @param {callable} [$options.callback] function ($result)
 	 * @return {array} ['data'=>binary,'format'=>string] or ['error'=>string]
 	 */
-	public static function removeBackground($image, $options = array())
+	public function removeBackground($image, $options = array())
 	{
-		$client       = self::getClient();
+		$client       = $this->getClient();
 		$modelId      = Q::ifset($options, 'model', 'stability.sd-remix');
 		$prompt       = Q::ifset($options, 'prompt', 'remove background');
 		$format       = Q::ifset($options, 'format', 'png');
@@ -182,5 +158,29 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 			'data'   => $result['data'],
 			'format' => $format
 		);
+	}
+
+	/**
+	 * Cached Bedrock client
+	 * @return BedrockRuntimeClient
+	 */
+	protected function getClient()
+	{
+		static $client = null;
+		if (!$client) {
+			$key    = Q_Config::expect('AI', 'aws', 'key');
+			$secret = Q_Config::expect('AI', 'aws', 'secret');
+			$region = Q_Config::get('AI', 'aws', 'region', 'us-east-1');
+
+			$client = new BedrockRuntimeClient([
+				'region'      => $region,
+				'version'     => 'latest',
+				'credentials' => [
+					'key'    => $key,
+					'secret' => $secret,
+				],
+			]);
+		}
+		return $client;
 	}
 }

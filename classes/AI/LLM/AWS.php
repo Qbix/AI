@@ -8,6 +8,15 @@ use Aws\BedrockRuntime\BedrockRuntimeClient;
  * Provides chat completion functionality via Anthropic models hosted on
  * AWS Bedrock.
  *
+ * This adapter is transport-only:
+ * - It serializes normalized messages
+ * - Invokes Bedrock
+ * - Returns the decoded response structure
+ *
+ * It MUST NOT:
+ * - Extract text or JSON payloads
+ * - Apply policies or accumulation
+ *
  * @class AI_LLM_AWS
  * @extends AI_LLM
  * @implements AI_LLM_Interface
@@ -51,76 +60,112 @@ class AI_LLM_AWS extends AI_LLM implements AI_LLM_Interface
 	}
 
 	/**
-	 * Creates a chat completion using AWS Bedrock.
+	 * Creates a chat completion using AWS Bedrock (Anthropic).
 	 *
 	 * Supported options:
-	 * - max_tokens: int (default 3000)
-	 * - temperature: float (default 0.5)
-	 * - callback: callable (optional)
-	 *
-	 * The callback, if provided, will be called with the final result array.
+	 * - max_tokens
+	 * - temperature
+	 * - callback (batch-safe)
 	 *
 	 * @method chatCompletions
-	 * @param {array} $messages Array of role => content pairs
+	 * @param {array} $messages Normalized role => content structure
 	 * @param {array} $options Optional parameters
-	 * @return {array} OpenAI-compatible response structure
+	 * @return {array} Decoded Bedrock response or error structure
 	 */
 	function chatCompletions(array $messages, $options = array())
 	{
 		$userCallback = Q::ifset($options, 'callback', null);
 
+		/**
+		 * Convert normalized messages into Anthropic prompt format.
+		 *
+		 * Bedrock (Anthropic) does not yet support OpenAI-style message arrays,
+		 * so we linearize content blocks conservatively.
+		 */
 		$prompt = '';
 		foreach ($messages as $role => $content) {
 			if ($role === 'system') {
+				// System prompt is prepended implicitly
+				$prompt .= $content . "\n\n";
 				continue;
 			}
-			$prompt .= ucfirst($role) . ": " . $content . "\n";
+
+			$prompt .= ucfirst($role) . ":\n";
+
+			if (is_array($content)) {
+				foreach ($content as $block) {
+					if (!is_array($block) || empty($block['type'])) {
+						continue;
+					}
+
+					switch ($block['type']) {
+						case 'text':
+							$prompt .= $block['text'] . "\n";
+							break;
+
+						case 'image_url':
+							// Bedrock Anthropic does NOT support images yet.
+							// Explicitly ignore but preserve determinism.
+							$prompt .= "[Image omitted]\n";
+							break;
+					}
+				}
+			} else {
+				// Fallback: treat as plain text
+				$prompt .= (string)$content . "\n";
+			}
+
+			$prompt .= "\n";
 		}
+
 		$prompt .= "Assistant:";
 
 		$payload = array(
-			'prompt'                => $prompt,
-			'max_tokens_to_sample'  => Q::ifset($options, 'max_tokens', 3000),
-			'temperature'           => Q::ifset($options, 'temperature', 0.5),
-			'top_k'                 => 250,
-			'top_p'                 => 0.999,
-			'stop_sequences'        => array("\n\nHuman:", "\n\nAssistant:")
+			'prompt'               => $prompt,
+			'max_tokens_to_sample' => Q::ifset($options, 'max_tokens', 3000),
+			'temperature'          => Q::ifset($options, 'temperature', 0.5),
+			'top_k'                => 250,
+			'top_p'                => 0.999,
+			'stop_sequences'       => array("\n\nHuman:", "\n\nAssistant:")
+		);
+
+		$result = array(
+			'data'  => null,
+			'error' => null
 		);
 
 		try {
-			$result = $this->client->invokeModel(array(
+			$response = $this->client->invokeModel(array(
 				'modelId'     => $this->modelId,
 				'body'        => json_encode($payload),
 				'contentType' => 'application/json',
 				'accept'      => 'application/json',
 			));
 
-			$body = json_decode($result['body']->getContents(), true);
+			$decoded = json_decode($response['body']->getContents(), true);
 
-			$response = array(
-				'choices' => array(
-					array(
-						'message' => array(
-							'content' => Q::ifset($body, 'completion', '')
-						)
-					)
-				)
-			);
+			if (!is_array($decoded)) {
+				$result['error'] = 'Invalid JSON returned by Bedrock';
+			} else {
+				$result['data'] = $decoded;
+			}
 		} catch (Exception $e) {
-			$response = array(
-				'error' => $e->getMessage()
-			);
+			$result['error'] = $e->getMessage();
 		}
 
-		// Optional user callback
+		// Optional batch-safe callback
 		if ($userCallback && is_callable($userCallback)) {
 			try {
-				call_user_func($userCallback, $response);
+				call_user_func($userCallback, $result);
 			} catch (Exception $e) {
 				error_log($e);
 			}
 		}
 
-		return $response;
+		if ($result['error']) {
+			return array('error' => $result['error']);
+		}
+
+		return $result['data'];
 	}
 }

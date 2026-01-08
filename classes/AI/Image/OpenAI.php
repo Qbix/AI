@@ -5,27 +5,16 @@ class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
 	/**
 	 * Generate an image via OpenAI Images API.
 	 *
-	 * Supported options:
-	 * - images: array of binary/base64/data-URI images (optional, ONLY FIRST USED)
-	 * - model: string (default gpt-image-1)
-	 * - format: png|jpg|webp
-	 * - width: int
-	 * - height: int
-	 * - size: "1024x1024" (overrides width/height)
-	 * - quality: standard|hd (mapped to auto|high)
-	 * - timeout: int (seconds)
-	 * - callback: callable (optional) function ($result)
-	 *
 	 * @param string $prompt
 	 * @param array  $options
 	 * @return array ['data' => binary, 'format' => string] or ['error' => mixed]
 	 */
-	public static function generate($prompt, $options = array())
+	public function generate($prompt, $options = array())
 	{
 		$apiKey = Q_Config::expect('AI', 'openAI', 'key');
 
 		$model   = Q::ifset($options, 'model', 'gpt-image-1');
-		$format  = Q::ifset($options, 'format', 'png');
+		$format  = strtolower(Q::ifset($options, 'format', 'png'));
 		$timeout = Q::ifset($options, 'timeout', 60);
 
 		$userCallback = Q::ifset($options, 'callback', null);
@@ -42,33 +31,40 @@ class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
 		$images   = Q::ifset($options, 'images', array());
 		$useImage = is_array($images) && !empty($images);
 
-		// Result container (shared for batch & non-batch)
 		$result = array(
 			'data'   => null,
 			'format' => $format,
 			'error'  => null
 		);
 
-		// Shared response handler
-		$callback = function ($response) use (&$result, $userCallback) {
+		/**
+		 * Transport-level callback
+		 * ALWAYS called as ($info, $responseBody)
+		 */
+		$callback = function ($info, $response) use (&$result, $format, $userCallback) {
 
-			if ($response === false || $response === null) {
-				$result['error'] = 'OpenAI API unreachable';
+			if (!is_string($response) || $response === '') {
+				$result['error'] = 'Empty or invalid OpenAI response';
 			} else {
 				$data = json_decode($response, true);
+
 				if (!is_array($data) || empty($data['data'][0]['b64_json'])) {
 					$result['error'] = $data;
 				} else {
-					$binary = base64_decode($data['data'][0]['b64_json']);
-					if ($binary === false) {
+					$pngBinary = base64_decode($data['data'][0]['b64_json'], true);
+					if ($pngBinary === false) {
 						$result['error'] = 'Failed to decode image data';
 					} else {
-						$result['data'] = $binary;
+						$converted = $this->convertFromPng($pngBinary, $format);
+						if (!$converted) {
+							$result['error'] = 'Image format conversion failed';
+						} else {
+							$result['data'] = $converted;
+						}
 					}
 				}
 			}
 
-			// Invoke user callback if provided
 			if ($userCallback && is_callable($userCallback)) {
 				try {
 					call_user_func($userCallback, $result);
@@ -79,7 +75,7 @@ class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
 		};
 
 		// -------------------------------
-		// TEXT-ONLY GENERATION (JSON)
+		// TEXT-ONLY GENERATION
 		// -------------------------------
 		if (!$useImage) {
 
@@ -113,49 +109,46 @@ class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
 		}
 
 		// -------------------------------
-		// IMAGE-BASED GENERATION (MULTIPART)
+		// IMAGE-BASED GENERATION
 		// -------------------------------
 		else {
-			$raw = Q_Utils::toRawBinary(reset($images));
-			if ($raw === false) {
-				return array('error' => 'Invalid image input');
-			}
+            $raw = Q_Utils::toRawBinary(reset($images));
+            if ($raw === false) {
+                return array('error' => 'Invalid image input');
+            }
 
-			$tmp = tempnam(sys_get_temp_dir(), 'ai_img_');
-			file_put_contents($tmp, $raw);
+            $tmp = tempnam(sys_get_temp_dir(), 'ai_img_');
+            file_put_contents($tmp, $raw);
 
-			$postFields = array(
-				'model'  => $model,
-				'prompt' => $prompt,
-				'image'  => new CURLFile($tmp, 'image/png'),
-				'size'   => $size,
-				'n'      => 1
-			);
+            $postFields = array(
+                'model'  => $model,
+                'prompt' => $prompt,
+                'image'  => new CURLFile($tmp, 'image/png'),
+                'size'   => $size,
+                'n'      => 1
+            );
 
-			$response = Q_Utils::post(
-				'https://api.openai.com/v1/images/edits',
-				$postFields,
-				null,
-				true,
-				array(
-					"Authorization: Bearer $apiKey"
-				),
-				$timeout,
-				$callback
-			);
+            $response = Q_Utils::post(
+                'https://api.openai.com/v1/images/edits',
+                $postFields,
+                null,
+                null, // IMPORTANT: let Q_Utils build multipart
+                array(
+                    "Authorization: Bearer $apiKey",
+                    "Content-Type: multipart/form-data"
+                ),
+                $timeout,
+                $callback
+            );
 
-			@unlink($tmp);
-		}
+            @unlink($tmp);
+        }
 
-		// -------------------------------
-		// Batch vs non-batch return
-		// -------------------------------
+		// Batch mode: callback fills result later
 		if (is_int($response)) {
-			// Batch mode: callback will populate $result later
 			return $result;
 		}
 
-		// Non-batch: callback already executed
 		if ($result['error']) {
 			return array('error' => $result['error']);
 		}
@@ -164,19 +157,61 @@ class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
 	}
 
 	/**
-	 * Remove background using OpenAI image edits.
-	 *
-	 * @method removeBackground
-	 * @static
-	 * @param {string} $image Raw binary, base64, or data URI
-	 * @param {array}  $options
-	 * @return {array}
+	 * Convert OpenAI PNG output to requested format
 	 */
-	public static function removeBackground($image, $options = array())
+	protected function convertFromPng($pngBinary, $format)
+	{
+		if ($format === 'png') {
+			return $pngBinary;
+		}
+
+		$img = @imagecreatefromstring($pngBinary);
+		if (!$img) {
+			return false;
+		}
+
+		$w = imagesx($img);
+		$h = imagesy($img);
+
+		// Flatten alpha for JPG
+		$canvas = imagecreatetruecolor($w, $h);
+		$white = imagecolorallocate($canvas, 255, 255, 255);
+		imagefill($canvas, 0, 0, $white);
+		imagecopy($canvas, $img, 0, 0, 0, 0, $w, $h);
+
+		ob_start();
+		switch ($format) {
+			case 'jpg':
+			case 'jpeg':
+				imagejpeg($canvas, null, 85);
+				break;
+			case 'webp':
+				if (!function_exists('imagewebp')) {
+					ob_end_clean();
+					return false;
+				}
+				imagewebp($canvas, null, 85);
+				break;
+			default:
+				ob_end_clean();
+				return false;
+		}
+		$out = ob_get_clean();
+
+		imagedestroy($img);
+		imagedestroy($canvas);
+
+		return $out;
+	}
+
+	/**
+	 * Remove background using OpenAI image edits.
+	 */
+	public function removeBackground($image, $options = array())
 	{
 		$options['images'] = array($image);
 		$options['prompt'] = Q::ifset($options, 'prompt', 'remove background');
 
-		return self::generate($options['prompt'], $options);
+		return $this->generate($options['prompt'], $options);
 	}
 }

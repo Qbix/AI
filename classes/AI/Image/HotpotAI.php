@@ -18,7 +18,7 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 	 *   @param {callable} [$options.callback] function ($result)
 	 * @return {array} Either ['data' => binary, 'format' => string] or ['error' => string]
 	 */
-	public static function removeBackground($image, $options = array())
+	public function removeBackground($image, $options = array())
 	{
 		$apiKey       = Q_Config::expect('AI', 'hotpot', 'key');
 		$url          = 'https://api.hotpot.ai/remove-background';
