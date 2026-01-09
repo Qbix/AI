@@ -1,136 +1,155 @@
 <?php
 
-use Aws\BedrockRuntime\BedrockRuntimeClient;
-
-class AI_LLM_AWS extends AI_LLM implements AI_LLM_Interface
+class AI_LLM_Google extends AI_LLM
 {
-	protected $client;
-	protected $modelId;
+	protected $apiKey;
+	protected $model;
+	protected $endpoint;
 
 	function __construct()
 	{
-		$this->client = new BedrockRuntimeClient(array(
-			'region'  => Q_Config::expect('AI', 'aws', 'region'),
-			'version' => 'latest',
-		));
-
-		$this->modelId = Q_Config::get(
+		$this->apiKey = Q_Config::expect('AI', 'google', 'api_key');
+		$this->model  = Q_Config::get(
 			'AI',
-			'aws',
-			'llm_model_id',
-			'anthropic.claude-3-sonnet-20240229-v1:0'
+			'google',
+			'llm_model',
+			'models/gemini-1.5-flash'
 		);
+
+		$this->endpoint =
+			'https://generativelanguage.googleapis.com/v1beta/' .
+			$this->model .
+			':generateContent?key=' . urlencode($this->apiKey);
 	}
 
-	function chatCompletions(array $messages, $options = array())
+	/**
+	 * Execute a single Gemini model invocation.
+	 *
+	 * Contract:
+	 * - Exactly ONE HTTP request
+	 * - Supports text + image inputs
+	 * - Returns normalized semantic text
+	 * - Optional raw provider payload via &$raw
+	 *
+	 * @method executeModel
+	 * @param string $prompt
+	 * @param array  $inputs
+	 * @param array  $options
+	 * @param array  &$raw Optional raw provider response
+	 * @return string
+	 * @throws Exception
+	 */
+	public function executeModel($prompt, array $inputs, array $options = array(), &$raw = null)
 	{
-		$userCallback   = Q::ifset($options, 'callback', null);
 		$responseFormat = Q::ifset($options, 'response_format', null);
 		$schema         = Q::ifset($options, 'json_schema', null);
+		$temperature    = Q::ifset($options, 'temperature', 0.5);
+		$maxTokens      = Q::ifset($options, 'max_tokens', 3000);
 
-		$prompt = '';
+		/* ---------- System / schema enforcement (prompt-level only) ---------- */
 
-		/* ---------- Schema / JSON instructions (prompt-level only) ---------- */
+		$system = '';
 
 		if ($responseFormat === 'json_schema' && is_array($schema)) {
-			$prompt .=
+			$system .=
 				"You are a strict JSON generator.\n" .
-				"Output MUST be valid JSON and MUST conform exactly to this JSON Schema:\n\n" .
+				"Output MUST conform exactly to this JSON Schema:\n\n" .
 				json_encode($schema, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) .
-				"\n\n" .
-				"Rules:\n" .
+				"\n\nRules:\n" .
 				"- Output JSON only\n" .
 				"- Do not include prose, comments, or markdown\n" .
 				"- Do not omit required fields\n" .
-				"- Use null when a value is unknown\n\n";
+				"- Use null when uncertain\n\n";
 		} elseif ($responseFormat === 'json') {
-			$prompt .=
+			$system .=
 				"You are a strict JSON generator.\n" .
 				"Output MUST be valid JSON.\n" .
-				"Do not include prose, comments, or markdown.\n\n";
+				"Do not include prose, comments, or markdown\n\n";
 		}
 
-		/* ---------- Convert normalized messages ---------- */
+		/* ---------- Build Gemini contents ---------- */
 
-		foreach ($messages as $role => $content) {
-			if ($role === 'system') {
-				$prompt .= $content . "\n\n";
-				continue;
-			}
+		$parts = array(
+			array('text' => $system . $prompt)
+		);
 
-			$prompt .= ucfirst($role) . ":\n";
-
-			if (is_array($content)) {
-				foreach ($content as $block) {
-					if (!is_array($block) || empty($block['type'])) {
-						continue;
-					}
-
-					switch ($block['type']) {
-						case 'text':
-							$prompt .= $block['text'] . "\n";
-							break;
-
-						case 'image_url':
-							// Claude via Bedrock has no vision support
-							$prompt .= "[Image omitted]\n";
-							break;
-					}
-				}
-			} else {
-				$prompt .= (string)$content . "\n";
-			}
-
-			$prompt .= "\n";
+		if (!empty($inputs['text'])) {
+			$parts[] = array('text' => $inputs['text']);
 		}
 
-		$prompt .= "Assistant:";
+		if (!empty($inputs['images'])) {
+			foreach ($inputs['images'] as $img) {
+				$parts[] = array(
+					'inline_data' => array(
+						'mime_type' => 'image/png',
+						'data'      => base64_encode($img)
+					)
+				);
+			}
+		}
 
 		$payload = array(
-			'prompt'               => $prompt,
-			'max_tokens_to_sample' => Q::ifset($options, 'max_tokens', 3000),
-			'temperature'          => Q::ifset($options, 'temperature', 0.5),
-			'top_k'                => 250,
-			'top_p'                => 0.999,
-			'stop_sequences'       => array("\n\nHuman:", "\n\nAssistant:")
+			'contents' => array(
+				array(
+					'role'  => 'user',
+					'parts' => $parts
+				)
+			),
+			'generationConfig' => array(
+				'temperature'     => $temperature,
+				'maxOutputTokens' => $maxTokens
+			)
 		);
 
-		$result = array(
-			'data'  => null,
-			'error' => null
-		);
+		/* ---------- HTTP request ---------- */
 
-		try {
-			$response = $this->client->invokeModel(array(
-				'modelId'     => $this->modelId,
-				'body'        => json_encode($payload),
-				'contentType' => 'application/json',
-				'accept'      => 'application/json',
-			));
+		$ch = curl_init($this->endpoint);
+		curl_setopt_array($ch, array(
+			CURLOPT_POST           => true,
+			CURLOPT_HTTPHEADER     => array('Content-Type: application/json'),
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_POSTFIELDS     => json_encode($payload)
+		));
 
-			$decoded = json_decode($response['body']->getContents(), true);
+		$response = curl_exec($ch);
+		if ($response === false) {
+			$error = curl_error($ch);
+			curl_close($ch);
+			throw new Exception($error);
+		}
+		curl_close($ch);
 
-			if (!is_array($decoded)) {
-				$result['error'] = 'Invalid JSON returned by Bedrock';
-			} else {
-				$result['data'] = $decoded;
+		$decoded = json_decode($response, true);
+		if (!is_array($decoded)) {
+			throw new Exception('Invalid JSON returned by Gemini');
+		}
+
+		// expose raw provider payload if requested
+		$raw = $decoded;
+
+		return $this->normalizeGeminiOutput($decoded);
+	}
+
+	/**
+	 * Normalize Gemini response into semantic text.
+	 *
+	 * @param array $response
+	 * @return string
+	 */
+	protected function normalizeGeminiOutput(array $response)
+	{
+		if (empty($response['candidates'][0]['content']['parts'])) {
+			return '';
+		}
+
+		$text = '';
+
+		foreach ($response['candidates'][0]['content']['parts'] as $part) {
+			if (isset($part['text']) && is_string($part['text'])) {
+				$text .= $part['text'];
 			}
-		} catch (Exception $e) {
-			$result['error'] = $e->getMessage();
 		}
 
-		if ($userCallback && is_callable($userCallback)) {
-			try {
-				call_user_func($userCallback, $result);
-			} catch (Exception $e) {
-				error_log($e);
-			}
-		}
-
-		if ($result['error']) {
-			return array('error' => $result['error']);
-		}
-
-		return $result['data'];
+		return trim($text);
 	}
 }

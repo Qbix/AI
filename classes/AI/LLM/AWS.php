@@ -2,7 +2,7 @@
 
 use Aws\BedrockRuntime\BedrockRuntimeClient;
 
-class AI_LLM_AWS extends AI_LLM implements AI_LLM_Interface
+class AI_LLM_AWS extends AI_LLM
 {
 	protected $client;
 	protected $modelId;
@@ -11,7 +11,7 @@ class AI_LLM_AWS extends AI_LLM implements AI_LLM_Interface
 	{
 		$this->client = new BedrockRuntimeClient(array(
 			'region'  => Q_Config::expect('AI', 'aws', 'region'),
-			'version' => 'latest',
+			'version' => 'latest'
 		));
 
 		$this->modelId = Q_Config::get(
@@ -22,115 +22,106 @@ class AI_LLM_AWS extends AI_LLM implements AI_LLM_Interface
 		);
 	}
 
-	function chatCompletions(array $messages, $options = array())
+	/**
+	 * Execute a single model invocation against AWS Bedrock (Claude).
+	 *
+	 * Contract:
+	 * - Exactly ONE invokeModel() call
+	 * - Multimodal inputs are ignored (Claude has no vision)
+	 * - Returns normalized semantic text
+	 * - Optionally exposes raw provider response via &$raw
+	 *
+	 * @method executeModel
+	 * @param string $prompt
+	 * @param array  $inputs
+	 * @param array  $options
+	 * @param array  &$raw Optional raw provider payload
+	 * @return string
+	 * @throws Exception
+	 */
+	public function executeModel($prompt, array $inputs, array $options = array(), &$raw = null)
 	{
-		$userCallback   = Q::ifset($options, 'callback', null);
 		$responseFormat = Q::ifset($options, 'response_format', null);
 		$schema         = Q::ifset($options, 'json_schema', null);
 
-		$prompt = '';
+		$temperature = Q::ifset($options, 'temperature', 0.5);
+		$maxTokens   = Q::ifset($options, 'max_tokens', 3000);
 
-		/* ---------- Schema / JSON instructions (prompt-level only) ---------- */
+		$fullPrompt = '';
+
+		/* ---------- JSON / schema enforcement (prompt-level only) ---------- */
 
 		if ($responseFormat === 'json_schema' && is_array($schema)) {
-			$prompt .=
+			$fullPrompt .=
 				"You are a strict JSON generator.\n" .
 				"Output MUST be valid JSON and MUST conform exactly to this JSON Schema:\n\n" .
 				json_encode($schema, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) .
-				"\n\n" .
-				"Rules:\n" .
+				"\n\nRules:\n" .
 				"- Output JSON only\n" .
-				"- Do not include prose, comments, or markdown outside the JSON\n" .
+				"- Do not include prose, comments, or markdown\n" .
 				"- Do not omit required fields\n" .
 				"- Use null when a value is unknown\n\n";
 		} elseif ($responseFormat === 'json') {
-			$prompt .=
+			$fullPrompt .=
 				"You are a strict JSON generator.\n" .
 				"Output MUST be valid JSON.\n" .
-				"Do not include prose, comments, or markdown outside the JSON.\n\n";
+				"Do not include prose, comments, or markdown\n\n";
 		}
 
-		/* ---------- Convert normalized messages ---------- */
+		/* ---------- Core prompt ---------- */
 
-		foreach ($messages as $role => $content) {
-			if ($role === 'system') {
-				$prompt .= $content . "\n\n";
-				continue;
-			}
+		$fullPrompt .= $prompt . "\n\n";
 
-			$prompt .= ucfirst($role) . ":\n";
-
-			if (is_array($content)) {
-				foreach ($content as $block) {
-					if (!is_array($block) || empty($block['type'])) {
-						continue;
-					}
-
-					switch ($block['type']) {
-						case 'text':
-							$prompt .= $block['text'] . "\n";
-							break;
-
-						case 'image_url':
-							// Claude via Bedrock has no vision support
-							$prompt .= "[Image omitted]\n";
-							break;
-					}
-				}
-			} else {
-				$prompt .= (string)$content . "\n";
-			}
-
-			$prompt .= "\n";
+		if (!empty($inputs['text'])) {
+			$fullPrompt .= $inputs['text'] . "\n\n";
 		}
 
-		$prompt .= "Assistant:";
+		// Claude does NOT support images — explicitly ignore
+		if (!empty($inputs['images'])) {
+			$fullPrompt .= "[Image inputs omitted]\n\n";
+		}
+
+		$fullPrompt .= "Assistant:";
 
 		$payload = array(
-			'prompt'               => $prompt,
-			'max_tokens_to_sample' => Q::ifset($options, 'max_tokens', 3000),
-			'temperature'          => Q::ifset($options, 'temperature', 0.5),
+			'prompt'               => $fullPrompt,
+			'max_tokens_to_sample' => $maxTokens,
+			'temperature'          => $temperature,
 			'top_k'                => 250,
 			'top_p'                => 0.999,
 			'stop_sequences'       => array("\n\nHuman:", "\n\nAssistant:")
 		);
 
-		$result = array(
-			'data'  => null,
-			'error' => null
-		);
+		$response = $this->client->invokeModel(array(
+			'modelId'     => $this->modelId,
+			'body'        => json_encode($payload),
+			'contentType' => 'application/json',
+			'accept'      => 'application/json'
+		));
 
-		try {
-			$response = $this->client->invokeModel(array(
-				'modelId'     => $this->modelId,
-				'body'        => json_encode($payload),
-				'contentType' => 'application/json',
-				'accept'      => 'application/json',
-			));
-
-			$decoded = json_decode($response['body']->getContents(), true);
-
-			if (!is_array($decoded)) {
-				$result['error'] = 'Invalid JSON returned by Bedrock';
-			} else {
-				$result['data'] = $decoded;
-			}
-		} catch (Exception $e) {
-			$result['error'] = $e->getMessage();
+		$decoded = json_decode($response['body']->getContents(), true);
+		if (!is_array($decoded)) {
+			throw new Exception('Invalid JSON returned by Bedrock');
 		}
 
-		if ($userCallback && is_callable($userCallback)) {
-			try {
-				call_user_func($userCallback, $result);
-			} catch (Exception $e) {
-				error_log($e);
-			}
+		// expose raw provider payload if requested
+		$raw = $decoded;
+
+		return $this->normalizeClaudeOutput($decoded);
+	}
+
+	/**
+	 * Normalize Claude (Bedrock) output into semantic text.
+	 *
+	 * @param array $response
+	 * @return string
+	 */
+	protected function normalizeClaudeOutput(array $response)
+	{
+		if (isset($response['completion']) && is_string($response['completion'])) {
+			return trim($response['completion']);
 		}
 
-		if ($result['error']) {
-			return array('error' => $result['error']);
-		}
-
-		return $result['data'];
+		return '';
 	}
 }

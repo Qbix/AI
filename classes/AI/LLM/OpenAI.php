@@ -3,35 +3,22 @@
 class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
 {
 	/**
-	 * Creates a chat completion using OpenAI.
+	 * Creates a chat completion using OpenAI (LEGACY, TEXT-ONLY).
+	 *
+	 * Cheapest model, backward compatibility only.
 	 *
 	 * @method chatCompletions
-	 * @param {array} $messages An array of role => content
-	 * @param {array} $options Optional parameters:
-	 *   @param {string}  [$options.model="gpt-5.2-instant"]
-	 *   @param {integer} [$options.max_tokens=3000]
-	 *   @param {float}   [$options.temperature=0.5]
-	 *   @param {integer} [$options.numResults=1]
-	 *   @param {integer} [$options.presencePenalty=0]
-	 *   @param {integer} [$options.frequencyPenalty=0]
-	 *   @param {integer} [$options.timeout=300]
-	 *   @param {string}  [$options.response_format=null] "json" | "json_schema"
-	 *   @param {array}   [$options.json_schema] Required if response_format=json_schema
-	 *   @param {callable}[$options.callback]
-	 *
-	 * @return {array}
+	 * @return array
 	 */
-	function chatCompletions(array $messages, $options = array())
+	public function chatCompletions(array $messages, $options = array())
 	{
 		$apiKey = Q_Config::expect('AI', 'openAI', 'key');
-		$userCallback = Q::ifset($options, 'callback', null);
 
 		$headers = array(
 			"Content-Type: application/json",
 			"Authorization: Bearer $apiKey"
 		);
 
-		// Normalize messages
 		$m = array();
 		foreach ($messages as $role => $content) {
 			$m[] = array(
@@ -41,88 +28,151 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
 		}
 
 		$payload = array(
-			'model'             => Q::ifset($options, 'model', 'gpt-5.2-instant'),
-			'max_tokens'        => Q::ifset($options, 'max_tokens', 3000),
-			'temperature'       => Q::ifset($options, 'temperature', 0.5),
-			'n'                 => Q::ifset($options, 'numResults', 1),
-			'presence_penalty'  => Q::ifset($options, 'presencePenalty', 0),
-			'frequency_penalty' => Q::ifset($options, 'frequencyPenalty', 0),
-			'messages'          => $m
+			'model'       => Q::ifset($options, 'model', 'gpt-4o-mini'),
+			'max_tokens'  => Q::ifset($options, 'max_tokens', 3000),
+			'temperature' => Q::ifset($options, 'temperature', 0.5),
+			'messages'    => $m
 		);
 
-		// Structured output handling
-		$responseFormat = Q::ifset($options, 'response_format', null);
-
-		if ($responseFormat === 'json_schema') {
-			$schema = Q::ifset($options, 'json_schema', null);
-			if (!$schema || !is_array($schema)) {
-				throw new Exception("json_schema must be provided when response_format=json_schema");
-			}
-			$payload['response_format'] = array(
-				'type' => 'json_schema',
-				'json_schema' => $schema
-			);
-		}
-		// response_format === 'json' is prompt-enforced only (no payload change)
-
-		$timeout = Q_Config::get('AI', 'openAI', 'timeout', 300);
-
-		$result = array(
-			'data'  => null,
-			'error' => null
-		);
-
-		// Shared response handler (batch-safe)
-		$callback = function ($indexOrHandle, $response) use (&$result, $userCallback) {
-
-			if (!is_string($response) || $response === '') {
-				$result['error'] = 'Empty or invalid response';
-			} else {
-				$envelope = json_decode($response, true);
-				if (!is_array($envelope)) {
-					$result['error'] = 'Invalid JSON envelope from OpenAI';
-				} else {
-					$content =
-						$envelope['choices'][0]['message']['content'] ?? null;
-
-					if (!is_string($content)) {
-						$result['error'] = 'Missing message content';
-					} else {
-						$decoded = json_decode($content, true);
-						if (is_array($decoded)) {
-							$result['data'] = $decoded;
-						} else {
-							$result['error'] = 'Invalid JSON from model content';
-						}
-					}
-				}
-			}
-
-			if ($userCallback) {
-				$userCallback($result);
-			}
-		};
-
-		$json = Q_Utils::post(
+		$response = Q_Utils::post(
 			'https://api.openai.com/v1/chat/completions',
 			$payload,
 			null,
 			null,
 			$headers,
-			Q::ifset($options, 'timeout', $timeout),
-			$callback
+			Q::ifset($options, 'timeout', 300)
 		);
 
-		// Batch mode
-		if (is_int($json)) {
-			return array();
+		$decoded = json_decode($response, true);
+
+		$content = '';
+		if (is_array($decoded)
+			&& isset($decoded['choices'][0]['message']['content'])
+			&& is_string($decoded['choices'][0]['message']['content'])
+		) {
+			$content = $decoded['choices'][0]['message']['content'];
 		}
 
-		// Non-batch
-		if ($result['error']) {
-			return array('error' => $result['error']);
+		return array(
+			'choices' => array(
+				array(
+					'message' => array(
+						'content' => $content
+					)
+				)
+			)
+		);
+	}
+
+	/**
+	 * Execute a model call using OpenAI's Responses API.
+	 *
+	 * Canonical execution path.
+	 * Returns normalized semantic text.
+	 *
+	 * @method executeModel
+	 * @param string $prompt
+	 * @param array  $inputs
+	 * @param array  $options
+	 * @param array  &$raw Optional provider-native response
+	 * @return string
+	 * @throws Exception
+	 */
+	public function executeModel($prompt, array $inputs, array $options = array(), &$raw = null)
+	{
+		$apiKey = Q_Config::expect('AI', 'openAI', 'key');
+
+		$headers = array(
+			"Content-Type: application/json",
+			"Authorization: Bearer $apiKey"
+		);
+
+		$content = array(
+			array(
+				'type' => 'input_text',
+				'text' => $prompt
+			)
+		);
+
+		if (!empty($inputs['text'])) {
+			$content[] = array(
+				'type' => 'input_text',
+				'text' => $inputs['text']
+			);
 		}
 
-		return $result['data'];
+		if (!empty($inputs['images']) && is_array($inputs['images'])) {
+			foreach ($inputs['images'] as $binary) {
+				$content[] = array(
+					'type' => 'input_image',
+					'image_url' => 'data:image/png;base64,' . base64_encode($binary)
+				);
+			}
+		}
+
+		$payload = array(
+			'model' => Q::ifset($options, 'model', 'gpt-4.1-mini'),
+			'input' => array(
+				array(
+					'role'    => 'user',
+					'content' => $content
+				)
+			),
+			'max_output_tokens' => Q::ifset($options, 'max_tokens', 3000),
+			'temperature'      => Q::ifset($options, 'temperature', 0.5)
+		);
+
+		$response = Q_Utils::post(
+			'https://api.openai.com/v1/responses',
+			$payload,
+			null,
+			null,
+			$headers,
+			Q::ifset($options, 'timeout', 300)
+		);
+
+		$decoded = json_decode($response, true);
+		if (!is_array($decoded)) {
+			throw new Exception("Invalid Responses API envelope");
+		}
+
+		// expose raw provider response if requested
+		$raw = $decoded;
+
+		return $this->normalizeResponsesOutput($decoded);
+	}
+
+	/**
+	 * Normalize OpenAI Responses output into semantic text.
+	 *
+	 * @param array $response
+	 * @return string
+	 */
+	protected function normalizeResponsesOutput(array $response)
+	{
+		if (empty($response['output']) || !is_array($response['output'])) {
+			return '';
+		}
+
+		foreach ($response['output'] as $item) {
+			if (!isset($item['type']) || $item['type'] !== 'message') {
+				continue;
+			}
+
+			if (empty($item['content']) || !is_array($item['content'])) {
+				continue;
+			}
+
+			foreach ($item['content'] as $block) {
+				if (isset($block['type'], $block['text'])
+					&& $block['type'] === 'output_text'
+					&& is_string($block['text'])
+				) {
+					return trim($block['text']);
+				}
+			}
+		}
+
+		return '';
 	}
 }
