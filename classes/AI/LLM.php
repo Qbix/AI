@@ -115,11 +115,9 @@ interface AI_LLM_Interface
 	 *   - response_format ("json", "json_schema")
 	 *   - json_schema
 	 *   - timeout
+     *   - some adapters might allow additional &$references to fill besides text
 	 *
-	 * @return {mixed}
-	 *   Raw decoded model output:
-	 *   - string (most text generations)
-	 *   - array  (structured JSON output)
+	 * @return {string} The model returns text requested.
 	 */
 	function executeModel($prompt, array $inputs, array $options = array());
 }
@@ -206,7 +204,7 @@ abstract class AI_LLM implements AI_LLM_Interface
 	 */
 	abstract public function executeModel($prompt, array $inputs, array $options = array());
 
-/**
+    /**
 	 * Process multimodal inputs through observation evaluation.
 	 *
 	 * Exactly ONE model call is made.
@@ -229,14 +227,16 @@ abstract class AI_LLM implements AI_LLM_Interface
 	 *   }
 	 * @param {array} [$interpolate]
 	 *   Optional placeholder map passed to Q::interpolate()
+     * @param {array} [$options]
+	 *   Options to pass to executeModel method
 	 * @return {array}
-	 *   Observation JSON emitted by the model.
-	 * @throws {Exception}
+	 *   Observation JSON emitted by the model, or empty array if no observations passed.
+	 * @throws {Q_Exception}
 	 */
-	public function process(array $inputs, array $observations, array $interpolate = array(), array $options = array())
+	function process(array $inputs, array $observations, array $interpolate = array(), array $options = array())
 	{
 		if (empty($observations)) {
-			throw new Exception("Nothing to process: no observations defined");
+			return array();
 		}
 
 		$o = self::promptFromObservations($observations);
@@ -269,7 +269,7 @@ abstract class AI_LLM implements AI_LLM_Interface
 
 		$data = json_decode($response, true);
 		if (!is_array($data)) {
-			throw new Exception("Model did not return valid JSON");
+			throw new Q_Exception("Model did not return valid JSON");
 		}
 
 		return $data;
@@ -375,7 +375,7 @@ abstract class AI_LLM implements AI_LLM_Interface
 		);
 	}
 
-     /**
+    /**
      * Can be used to summarize the text, generate keywords for searching, and find out who's speaking.
      * @method summarize
      * @param {string} $text the text to summarize, should fit into the LLM's context window
@@ -391,95 +391,60 @@ abstract class AI_LLM implements AI_LLM_Interface
         if (!isset($options['max_tokens'])) {
             $options['max_tokens'] = 1000;
         }
-        $keywordsInstructions = <<<HEREDOC
-Inside the <keywords> section, output a **single line** with up to 50 comma-separated 1-word keywords or 2-word key phrases that would help someone find the text in an archive or search engine.
-
-Only include the most relevant and commonly searched terms, using synonyms or generalizations if needed. Prioritize relevance and common usage.
-
-The entire <keywords> section must not exceed 400 characters (including commas). Do not use newlines, bullet points, or any other formatting.
-HEREDOC;
-        
-        $summaryInstructions = <<<HEREDOC
-Inside the <summary> section, write a single paragraph (less than 512 characters) summarizing the **core ideas** expressed in the text.
-
-Avoid run-on sentences and do not use multiple paragraphs. Ignore any promotional or advertising content.
-
-Do not refer to "this conversation", "the content", or the names of hosts or speakers directly. Just express what was said, clearly and neutrally, as if paraphrasing it into a shorter version.
-HEREDOC;
-        
-        $speakersInstructions = <<<HEREDOC
-Inside the <speakers> section, write either:
-- A comma-separated list of speaker names (if clearly identifiable in the text)
-- Or the exact string: no names
-
-Do not guess. If the speakers are not explicitly named, respond with "no names" exactly.
-HEREDOC;
-        
-        $instructions = <<<HEREDOC
-You are a language model tasked with extracting structured summaries for indexing, using clearly labeled XML-style tags.
-
-Output **exactly three sections**:
-1. <keywords> one line, 400 characters max
-2. <summary> one paragraph, 512 characters max
-3. <speakers> either names or "no names"
-
-Follow this format exactly, without variation. Example:
-
-===
-<title>
-Generate a title for the text, comfortably under 200 characters
-</title>
-
-<keywords>
-keyword1, keyword2, keyword3, ...
-</keywords>
-
-<summary>
-This is the 1-paragraph summary of the main points from the text.
-</summary>
-
-<speakers>
-name1, name2
-</speakers>
-===
-
-Now process the following text:
-
-$text
-HEREDOC;
 
         if (!trim($text)) {
             return array();
         }
-        $user = $instructions . $text;
-        $messages = array(
-            'system' => 'You are generating a concise summary and determining the best keywords',
-            'user' => $user
+
+        $instructions = <<<HEREDOC
+    You are a language model tasked with extracting structured summaries for indexing, using clearly labeled XML-style tags.
+
+    Output exactly these sections:
+    <title> (under 200 characters)
+    <keywords> one line, max 400 characters
+    <summary> one paragraph, max 512 characters
+    <speakers> comma-separated names OR "no names"
+
+    Rules:
+    - No extra text
+    - No markdown
+    - No explanations
+
+    Text to process:
+    $text
+HEREDOC;
+
+        $response = $this->executeModel(
+            $instructions,
+            array('text' => $text),
+            $options
         );
-        $completions = $this->chatCompletions($messages, $options);
-        $content = trim(Q::ifset(
-            $completions, 'choices', 0, 'message', 'content', ''
-        ));
-        
-        // Optionally strip code fences if hallucinated
-        $content = preg_replace('/^```(?:json)?\s*|\s*```$/m', '', $content);
-        
-        // Extract content between tags
+
+        $content = is_array($response)
+            ? json_encode($response)
+            : (string)$response;
+
+        $content = trim(preg_replace('/^```.*?\n|\n```$/s', '', $content));
+
         preg_match('/<title>(.*?)<\/title>/s', $content, $t);
         preg_match('/<keywords>(.*?)<\/keywords>/s', $content, $k);
         preg_match('/<summary>(.*?)<\/summary>/s', $content, $s);
         preg_match('/<speakers>(.*?)<\/speakers>/s', $content, $sp);
-        
-        $title = trim(isset($t[1]) ? $t[1] : '');
-        $summary = trim(isset($s[1]) ? $s[1] : '');
-        $speakers = trim(isset($sp[1]) ? $sp[1] : '');
-        $keywordsString = trim(isset($k[1]) ? $k[1] : '');
-        $keywords = preg_split('/\s*,\s*/', $keywordsString);
+
+        $title = trim($t[1] ?? '');
+        $summary = trim($s[1] ?? '');
+        $speakers = trim($sp[1] ?? '');
+        $keywordsString = trim($k[1] ?? '');
+
+        $keywords = $keywordsString !== ''
+            ? preg_split('/\s*,\s*/', $keywordsString)
+            : array();
+
         if (strtolower($speakers) === 'no names') {
             $speakers = '';
         }
-        
-        return compact('title', 'keywords', 'summary', 'speakers');        
+
+        return compact('title', 'keywords', 'summary', 'speakers');
     }
 
     /**
@@ -503,59 +468,347 @@ HEREDOC;
      */
     function keywords(array $keywords, $during = 'insert', $options = array())
     {
-        if (empty($keywords)) return [];
+        if (empty($keywords)) return array();
 
         $original = implode(', ', $keywords);
-        $modeDescription = $during === 'query'
-            ? "closely related synonyms and rephrasings"
-            : "a wide variety of synonyms, variations, alternate phrasing, related terms, abbreviations, and common search terms";
+        $temperature = ($during === 'query') ? 0.3 : 0.7;
 
         $prompt = <<<HEREDOC
-You are expanding canonical search keywords into useful query terms for a search engine.
+    Expand the following canonical search keywords into useful query terms.
 
-Here is the input:
-$original
+    Input:
+    $original
 
-Please output up to 1000 comma-separated search terms that people might use when looking for this content.
+    Rules:
+    - Output a single line
+    - Comma-separated
+    - Max 1000 terms
+    - Each term must be 1 or 2 words
+    - No punctuation other than commas
+    - No duplicates
+    - No sentences
+    - Highly relevant only
 
-Strict rules:
-- Only output one line.
-- Each term must be 1 or 2 words maximum. No more than 2 words.
-- No special characters, punctuation, or formatting.
-- No duplicates.
-- Do NOT include full sentences.
-- All terms must be highly relevant, not generic.
-- Think of synonyms, rephrasings, subtopics, and variations.
-- Imagine a smart autocomplete or tag system for searching.
+    Output only the keyword line.
+    HEREDOC;
 
-Example output:
-free talk, libertarian radio, bitcoin price, parking gender, bartering app, cryptocurrency tax, feminist activism
+        $response = $this->executeModel(
+            $prompt,
+            array('text' => $original),
+            array_merge(
+                array(
+                    'temperature' => $temperature,
+                    'max_tokens' => 2000
+                ),
+                $options
+            )
+        );
 
-Now output the expanded keyword line:
-HEREDOC;
+        $content = is_array($response)
+            ? json_encode($response)
+            : (string)$response;
 
-        $messages = [
-            'system' => 'You expand keywords for content indexing.',
-            'user' => $prompt
-        ];
+        $content = trim(preg_replace('/^```.*?\n|\n```$/s', '', $content));
 
-        $options = array_merge([
-            'model' => 'gpt-4o',
-            'temperature' => $during === 'query' ? 0.3 : 0.7,
-            'max_tokens' => 2000,
-        ], $options);
-
-        $completions = $this->chatCompletions($messages, $options);
-        $content = trim(Q::ifset($completions, 'choices', 0, 'message', 'content', ''));
-
-        // Remove any markdown code fences if hallucinated
-        $content = preg_replace('/^```(?:json)?\s*|\s*```$/m', '', $content);
-
-        // Parse and sanitize the final list
         $expanded = preg_split('/\s*,\s*/', $content);
-        $expanded = array_unique(array_filter(array_map('strtolower', $expanded)));
+        $expanded = array_unique(
+            array_filter(
+                array_map('strtolower', $expanded)
+            )
+        );
 
-        return $expanded;
+        return array_values($expanded);
     }
+
+
+    /**
+	 * Use this function to merge all the files under AI/observations config,
+	 * and get info for all potential observations, indexed by their name.
+	 *
+	 * After loading all configs, each top-level entry is interpolated using
+	 * Q::interpolate($value, $rootArray).
+	 *
+	 * @method userStreamsTree
+	 * @static
+	 */
+	static function observationsTree()
+	{
+		static $p = null;
+		static $previousArr = null;
+
+		$arr = Q_Config::get('AI', 'observations', array());
+		if ($p && $previousArr === $arr) {
+			return $p;
+		}
+		$previousArr = $arr;
+
+		$p = new Q_Tree();
+		$app = Q::app();
+
+		foreach ($arr as $k => $v) {
+			$PREFIX = ($k === $app ? 'APP' : strtoupper($k).'_PLUGIN');
+			$path = constant($PREFIX . '_CONFIG_DIR');
+			$p->load($path . DS . $v);
+		}
+
+		// Interpolate each top-level entry
+		$communityId = Users::communityId();
+		$currentCommunityId = Users::currentCommunityId();
+        $currentYear = date("Y");
+		$loggedInUser = Users::loggedInUser();
+		$loggedInUserId = $loggedInUser ? $loggedInUser->id : null;
+		$vars = compact(
+			'communityId', 'currentCommunityId', 'loggedInUserId', 'currentYear'
+		);
+		$all = $p->getAll();
+		$interp = array();
+		foreach ($all as $key => $value) {
+			$newKey = Q::interpolate($key, $vars);
+			if ($newKey !== $key) {
+				$p->clear($key);
+				$interp[$newKey] = $value;
+			}
+		}
+		foreach ($interp as $k => $v) {
+			$p->set($k, $v);
+		}
+		return $p;
+    }
+
+    /**
+     * Helper method to load all observation definitions from config,
+     * for a given type of input.
+     * @method observations
+     * @static
+     * @param {string} $streamType
+     * @param {string} $observationsType for that stream type
+     * @return {array}
+     */
+    static function observations($streamType, $observationsType)
+    {
+        return self::observationsTree()->get($streamType, $observationsType, array());
+    }
+
+    /**
+     * Gather deterministic stream attributes from data
+     * constrained strictly by observation fieldNames.
+     *
+     * @method fieldNames
+     * @static
+     * @param {string} [$streamType] e.g. "Streams/images"
+     * @param {string} [$observationsType] e.g. "holiday" for that stream type
+     * @param {array} [$results] data with the results to gather from
+     * @return {array}
+     */
+    static function fieldNames($streamType, $observationsType, array $results)
+    {
+        $attr = array();
+
+        // Load observation definitions
+        $observations = self::observations($streamType, $observationsType);
+        if (empty($observations)) {
+            return $attr;
+        }
+
+        // Collect allowed fieldNames
+        $allowed = array();
+        foreach ($observations as $obs) {
+            if (empty($obs['fieldNames']) || !is_array($obs['fieldNames'])) {
+                continue;
+            }
+            foreach ($obs['fieldNames'] as $field) {
+                $allowed[$field] = true;
+            }
+        }
+
+        // Filter + normalize
+        foreach ($allowed as $field => $stuff) {
+
+            if (!array_key_exists($field, $results)) {
+                continue;
+            }
+
+            $value = $results[$field];
+
+            // Strings: trim + drop empty
+            if (is_string($value)) {
+                $value = trim($value);
+                if ($value === '') continue;
+            }
+
+            // Arrays: compact + reindex
+            if (is_array($value)) {
+                $value = array_values(array_filter($value, function ($v) {
+                    return $v !== null && $v !== '';
+                }));
+                if (empty($value)) continue;
+            }
+
+            // Scalars: pass through
+            $attr[$field] = $value;
+        }
+
+        return $attr;
+    }
+
+    /**
+     * Run observations and optionally create a stream.
+     *
+     * @method createStream
+     * @param {string} $streamType 
+     * @param {string} Observation type (e.g. "images/holiday")
+     * @param {array} $stream Stream creation data (publisherId, type, title?, icon?)
+     * @param {array} [$results] Deterministic results of a model call
+     * @param {array} [$options] Behavior overrides
+     * @param {string} [$options.adapter] LLM adapter name
+     * @param {callable|true} [$options.accept] Acceptance callback, set to true to always accept
+     * @return {Streams_Stream|false} Created stream or false
+     */
+	static function createStream(
+		$streamType,
+        $observationsType,
+		array $stream,
+		array $results = array(),
+		array $options = array()
+	) {
+		// 1) Deterministic attributes
+		$attributes = self::fieldNames($streamType, $observationsType, $results);
+
+        $accept = Q::ifset($options, 'accept', array('AI_LLM', 'accept'));
+        if ($accept && $accept !== true && !call_user_func($accept, $attributes)) {
+            return false;
+        }
+
+		// 3) Create stream
+		$title = Q::ifset($stream, 'title', null);
+		if ($title === null && isset($attributes['title'])) {
+			$title = $attributes['title'];
+			unset($attributes['title']);
+		}
+
+        $publisherId = Q::ifset($options, 'publisherId', Q::app());
+		return Streams::create(
+			'AI',
+			$publisherId,
+			$streamType,
+			array(
+				'title' => $title,
+				'icon' => Q::ifset($stream, 'icon', null),
+				'attributes' => $attributes
+			),
+			array(
+				'skipAccess' => true
+			)
+		);
+	}
+
+
+	/**
+	 * Hard policy gate. Rejects before attributes are even written.
+	 * @method accept
+	 * @static
+	 * @param {array} $attributes
+	 * @return {boolean} 
+	 */
+	static function accept($attributes)
+	{
+		if (Q::ifset($attributes, 'obscene', 10) > 3
+		 || Q::ifset($attributes, 'controversial', 10) > 5
+		 || Q::ifset($attributes, 'confidence', 0) < 0.6) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Extract a compact, attribute-safe, FLAT attribute set
+	 * from LLM observation results.
+	 *
+	 * Output shape matches Streams_Stream::syncRelations expectations.
+	 *
+	 * @method attributesFromObservationResults
+	 * @static
+	 * @param {array} $observations Full LLM output (keyed by observation section)
+     * @param {string} [$streamType="Streams/image"]
+	 * @param {string} [$observationsType="holiday"]
+	 * @return {array} flat array of attributes
+	 */
+	static function attributesFromObservationResults(array $observations, $streamType = 'Streams/image', $observationsType = 'holiday')
+	{
+		$out = array();
+
+		// Load observation definitions
+		$defs = AI_LLM::observations($streamType, $observationsType);
+		if (empty($defs)) {
+			return $out;
+		}
+
+		// Collect allowed fieldNames
+		$allowed = array();
+		foreach ($defs as $def) {
+			if (empty($def['fieldNames']) || !is_array($def['fieldNames'])) {
+				continue;
+			}
+			foreach ($def['fieldNames'] as $field) {
+				$allowed[$field] = true;
+			}
+		}
+
+		// Flatten observations
+		foreach ($observations as $section => $values) {
+
+			if (!is_array($values)) {
+				continue;
+			}
+
+			foreach ($values as $field => $value) {
+
+				// Strict allowlist
+				if (empty($allowed[$field])) {
+					continue;
+				}
+
+				// Normalize strings
+				if (is_string($value)) {
+					$value = trim($value);
+					if ($value === '') continue;
+
+					// Truncate short semantic text
+					if ($field === 'title' || $field === 'subtitle') {
+						$value = mb_substr($value, 0, 100);
+					}
+				}
+
+				// Normalize arrays
+				if (is_array($value)) {
+					$value = array_values(array_filter($value, function ($v) {
+						return $v !== null && $v !== '';
+					}));
+					if (!$value) continue;
+
+					// Hard bounds for keyword arrays
+					if ($field === 'keywords' || $field === 'keywordsNative') {
+						$value = array_slice($value, 0, 10);
+						$value = array_map(function ($v) {
+							$v = Q_Utils::normalize($v);
+							return mb_substr((string)$v, 0, 32);
+						}, $value);
+						$value = array_values(array_filter($value, 'strlen'));
+						if (!$value) continue;
+					}
+				}
+
+				// Scalars: pass through
+				if ($value === null) {
+					continue;
+				}
+
+				$out[$field] = $value;
+			}
+		}
+
+		return $out;
+	}
 
 }

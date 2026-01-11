@@ -1,0 +1,118 @@
+{
+    "Streams/image": {
+        "holiday": {
+            "semanticExtraction": {
+                "promptClause": "First, extract explicit semantic facts visible in the image. Do not infer or invent text. If something is not clearly present, return null. Assume the current year is {{currentYear}}. If a known holiday is clearly referenced, identify it and give its date range for this year only. Use YYYY-MM-DD format.",
+                "fieldNames": [
+                    "title",
+                    "subtitle",
+                    "holidayName",
+                    "startDate",
+                    "endDate"
+                ],
+                "example": {
+                    "title": "Happy Valentine's Day",
+                    "subtitle": "Celebrate love with something sweet",
+                    "holidayName": "Valentine's Day",
+                    "startDate": "2026-02-14",
+                    "endDate": "2026-02-14"
+                }
+            },
+
+            "holidayAnalysis": {
+                "promptClause": "If holidayName is present, evaluate the global importance of this holiday. Return an integer from 1 to 10 representing importance to at least 1 million people worldwide. 10 = globally significant holidays (e.g. Christmas, Ramadan). 7-9 = widely observed national or religious holidays (e.g. Valentine's Day, Hanukkah). 4-6 = regional or multi-country holidays. 1-3 = minor or niche holidays. If no real holiday is present, return null. Base this on widely accepted real-world observance, not personal opinion.",
+                "fieldNames": [
+                    "holidayImportance"
+                ],
+                "example": {
+                    "holidayImportance": 9
+                }
+            },
+
+            "languageQuality": {
+                "promptClause": "Analyze the primaryImage and determine the primary language used, spelling quality, and expression naturalness. Base this judgment only on visible text and widely-known linguistic conventions. Do not infer intent or audience.",
+                "fieldNames": [
+                    "language",
+                    "spelling",
+                    "expressions"
+                ],
+                "example": {
+                    "language": "ru",
+                    "spelling": 9,
+                    "expressions": 8
+                }
+            },
+
+            "culturalRelevance": {
+                "promptClause": "Determine which countries and cultures this content is most relevant to based on visible imagery, symbols, and text. Do not guess. Only include countries that are strongly implied.",
+                "fieldNames": [
+                    "countries",
+                    "culturalSpecificity"
+                ],
+                "example": {
+                    "countries": ["RU", "UA"],
+                    "culturalSpecificity": 7
+                }
+            },
+
+            "timing": {
+                "promptClause": "Infer when this content would be relevant in the real world. Provide exact date ranges for the years 2025 and 2026 only. Use real holidays or events if clearly implied. Do not invent holidays. If no timing is evident, return an empty array.",
+                "fieldNames": [
+                    "dates",
+                    "evergreen"
+                ],
+                "example": {
+                    "dates": [
+                        ["2025-01-07", "2025-01-07"],
+                        ["2026-01-07", "2026-01-07"]
+                    ],
+                    "evergreen": 5
+                }
+            },
+
+            "contentClassification": {
+                "promptClause": "Classify what this content is and how it is presented. Describe type, occasion, tone, and sentiment without judging quality.",
+                "fieldNames": [
+                    "contentType",
+                    "occasion",
+                    "tone",
+                    "sentiment"
+                ],
+                "example": {
+                    "contentType": "greeting",
+                    "occasion": ["orthodoxChristmas"],
+                    "tone": ["festive"],
+                    "sentiment": "positive"
+                }
+            },
+
+            "safety": {
+                "promptClause": "Assess whether the content contains obscenity or material likely to cause controversy. Rate visibility of such elements, not intent.",
+                "fieldNames": [
+                    "obscene",
+                    "controversial"
+                ],
+                "example": {
+                    "obscene": 1,
+                    "controversial": 1
+                }
+            },
+
+            "discoveryQuality": {
+                "promptClause": "Evaluate how suitable this content is for discovery and sharing by others. Besides this, derive most common 10 keywords as single English words people might use to search for this. Normalize to lowercase alphanumeric only. If the primary language is English, set keywordsNative to empty array. Otherwise, fill keywordsNative with top 10 keywords as single words in that language.",
+                "fieldNames": [
+                    "shareability",
+                    "confidence",
+                    "keywords",
+                    "keywordsNative"
+                ],
+                "example": {
+                    "keywords": ["Orthodox", "Christmas", "Religious", "Holiday"],
+                    "keywordsNative": ["Православный", "Рождество", "Религиозный", "Праздник"],
+                    "shareability": 8,
+                    "confidence": 0.9
+                }
+            }
+        }
+    }
+}

@@ -11,8 +11,8 @@ interface AI_Image_Interface
 	 * @method generate
 	 * @param {string} $prompt The prompt to generate an image from
 	 * @param {array} $options Optional settings:
-	 * @param {string} [$options.model="dall-e-3"] The model to use, e.g. "dall-e-3" or "dall-e-2"
-	 * @param {string} [$options.response_format="url"] Either "url" or "b64_json" for base64 response
+	 * @param {string} [$options.model] The model to use, e.g. "dall-e-3" or "dall-e-2"
+	 * @param {string} [$options.response_format] Either "url" or "b64_json" for base64 response
 	 * @param {string} [$options.size="1024x1024"] The desired image size, e.g. "1024x1024"
 	 * @param {string} [$options.quality="standard"] The quality level, e.g. "standard" or "hd"
 	 * @return {array} Either ['url' => ...] or ['b64_json' => ...] or ['error' => ...]
@@ -105,4 +105,5 @@ class AI_Image implements AI_Image_Interface
         // otherwise return null so caller can handle.
         return null;
     }
+
 }

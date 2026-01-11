@@ -32,12 +32,12 @@ class AI_LLM_AWS extends AI_LLM
 	 * - Optionally exposes raw provider response via &$raw
 	 *
 	 * @method executeModel
-	 * @param string $prompt
-	 * @param array  $inputs
-	 * @param array  $options
-	 * @param array  &$raw Optional raw provider payload
-	 * @return string
-	 * @throws Exception
+	 * @param {string} $prompt
+	 * @param {array}  $inputs
+	 * @param {array}  $options
+	 * @param {array}  &$raw Optional raw provider payload
+	 * @return {string}
+	 * @throws {Exception}
 	 */
 	public function executeModel($prompt, array $inputs, array $options = array(), &$raw = null)
 	{
@@ -113,8 +113,8 @@ class AI_LLM_AWS extends AI_LLM
 	/**
 	 * Normalize Claude (Bedrock) output into semantic text.
 	 *
-	 * @param array $response
-	 * @return string
+	 * @param {array} $response
+	 * @return {string}
 	 */
 	protected function normalizeClaudeOutput(array $response)
 	{

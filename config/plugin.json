@@ -44,5 +44,10 @@
 	},
 	"Streams": {
 
+	},
+	"AI": {
+		"observations": {
+			"AI": "observations.json"
+		}
 	}
 }

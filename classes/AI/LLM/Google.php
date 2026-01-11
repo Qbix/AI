@@ -32,12 +32,12 @@ class AI_LLM_Google extends AI_LLM
 	 * - Optional raw provider payload via &$raw
 	 *
 	 * @method executeModel
-	 * @param string $prompt
-	 * @param array  $inputs
-	 * @param array  $options
-	 * @param array  &$raw Optional raw provider response
-	 * @return string
-	 * @throws Exception
+	 * @param {string} $prompt
+	 * @param {array}  $inputs
+	 * @param {array}  $options
+	 * @param {array}  &$raw Optional raw provider response
+	 * @return {string}
+	 * @throws {Exception}
 	 */
 	public function executeModel($prompt, array $inputs, array $options = array(), &$raw = null)
 	{
@@ -133,8 +133,8 @@ class AI_LLM_Google extends AI_LLM
 	/**
 	 * Normalize Gemini response into semantic text.
 	 *
-	 * @param array $response
-	 * @return string
+	 * @param {array} $response
+	 * @return {string}
 	 */
 	protected function normalizeGeminiOutput(array $response)
 	{

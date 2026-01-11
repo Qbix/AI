@@ -8,7 +8,7 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
 	 * Cheapest model, backward compatibility only.
 	 *
 	 * @method chatCompletions
-	 * @return array
+	 * @return {array}
 	 */
 	public function chatCompletions(array $messages, $options = array())
 	{
@@ -71,12 +71,12 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
 	 * Returns normalized semantic text.
 	 *
 	 * @method executeModel
-	 * @param string $prompt
-	 * @param array  $inputs
-	 * @param array  $options
-	 * @param array  &$raw Optional provider-native response
-	 * @return string
-	 * @throws Exception
+	 * @param {string} $prompt
+	 * @param {array}  $inputs
+	 * @param {array}  $options
+	 * @param {array}  &$raw Optional provider-native response
+	 * @return {string}
+	 * @throws {Exception}
 	 */
 	public function executeModel($prompt, array $inputs, array $options = array(), &$raw = null)
 	{
