@@ -2,6 +2,8 @@
 
 class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 {
+	const JPEG_QUALITY = 85;
+
 	/**
 	 * Removes the background from an image using Hotpot AI.
 	 * 
@@ -12,7 +14,7 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 	 *   @param {string} [$options.backgroundImage] A background image as base64 or URL
 	 *   @param {string} [$options.backgroundColor] A solid background color (e.g. "#ffffff")
 	 *   @param {bool}   [$options.returnAlpha=true] Whether to return transparency
-	 *   @param {string} [$options.fileType="png"] File type of result (png, jpg, webp)
+	 *   @param {string} [$options.fileType="png"] File type of result (png or jpg)
 	 *   @param {int}    [$options.compressionFactor=100] Compression level (10–100)
 	 *   @param {int}    [$options.timeout=60] Request timeout in seconds
 	 *   @param {callable} [$options.callback] function ($result)
@@ -24,26 +26,55 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 		$url          = 'https://api.hotpot.ai/remove-background';
 		$userCallback = Q::ifset($options, 'callback', null);
 
+		$format = strtolower(Q::ifset($options, 'fileType', 'png'));
+
 		$result = array(
 			'data'   => null,
-			'format' => Q::ifset($options, 'fileType', 'png'),
+			'format' => $format,
 			'error'  => null
 		);
 
-		$image = Q_Utils::toRawBinary($image);
-		if ($image === false) {
-			$result['error'] = 'Invalid base64 image';
+		$raw = Q_Utils::toRawBinary($image);
+		if ($raw === false) {
+			$result['error'] = 'Invalid image input';
 			if ($userCallback && is_callable($userCallback)) {
 				call_user_func($userCallback, $result);
 			}
-			return array'error' => $result['error']);
+			return array('error' => $result['error']);
 		}
+
+		$img = @imagecreatefromstring($raw);
+		if (!$img) {
+			$result['error'] = 'Unable to decode image';
+			if ($userCallback && is_callable($userCallback)) {
+				call_user_func($userCallback, $result);
+			}
+			return array('error' => $result['error']);
+		}
+
+		$hasAlpha = $this->imageHasAlpha($img);
+
+		ob_start();
+		if ($hasAlpha || $format === 'png') {
+			imagepng($img);
+			$encoded = ob_get_clean();
+			$mime    = 'image/png';
+			$filename = 'input.png';
+			$format  = 'png';
+		} else {
+			imagejpeg($img, null, self::JPEG_QUALITY);
+			$encoded = ob_get_clean();
+			$mime    = 'image/jpeg';
+			$filename = 'input.jpg';
+			$format  = 'jpg';
+		}
+		imagedestroy($img);
 
 		$boundary = uniqid('hp');
 		$eol = "\r\n";
 		$body = '';
 
-		foreach (['backgroundColor','fileType','compressionFactor','returnAlpha'] as $f) {
+		foreach (['backgroundColor','compressionFactor','returnAlpha'] as $f) {
 			if (isset($options[$f])) {
 				$val = is_bool($options[$f]) ? ($options[$f] ? 'true' : 'false') : $options[$f];
 				$body .= "--$boundary$eol"
@@ -53,17 +84,17 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 		}
 
 		$body .= "--$boundary$eol"
-		       . "Content-Disposition: form-data; name=\"image\"; filename=\"input.png\"$eol"
-		       . "Content-Type: application/octet-stream$eol$eol"
-		       . $image . $eol;
+		       . "Content-Disposition: form-data; name=\"image\"; filename=\"$filename\"$eol"
+		       . "Content-Type: $mime$eol$eol"
+		       . $encoded . $eol;
 
 		if (!empty($options['backgroundImage'])) {
-			$bg = base64_decode($options['backgroundImage']);
-			if ($bg !== false) {
+			$bgRaw = base64_decode($options['backgroundImage'], true);
+			if ($bgRaw !== false) {
 				$body .= "--$boundary$eol"
 				       . "Content-Disposition: form-data; name=\"backgroundImage\"; filename=\"bg.png\"$eol"
-				       . "Content-Type: application/octet-stream$eol$eol"
-				       . $bg . $eol;
+				       . "Content-Type: image/png$eol$eol"
+				       . $bgRaw . $eol;
 			} else {
 				$body .= "--$boundary$eol"
 				       . "Content-Disposition: form-data; name=\"backgroundUrl\"$eol$eol"
@@ -90,7 +121,8 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 		if ($resp === false) {
 			$result['error'] = 'HTTP or timeout error';
 		} else {
-			$result['data'] = $resp;
+			$result['data']   = $resp;
+			$result['format'] = $format;
 		}
 
 		if ($userCallback && is_callable($userCallback)) {
@@ -118,15 +150,15 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 	 * @static
 	 * @param {string} $prompt The prompt describing the image
 	 * @param {array} $options Optional parameters:
-	 *   @param {string} [$options.styleId="default"] The style ID for the artwork
-	 *   @param {string} [$options.seedImage] A seed image URL to guide generation
-	 *   @param {string} [$options.negativePrompt] Text to avoid
-	 *   @param {float}  [$options.promptStrength] Strength of prompt guidance
-	 *   @param {bool}   [$options.isRandom] Whether to use random seed
-	 *   @param {bool}   [$options.isTile] Whether to tile the image
-	 *   @param {int}    [$options.timeout=60] Request timeout in seconds
+	 *   @param {string} [$options.styleId="default"]
+	 *   @param {string} [$options.seedImage]
+	 *   @param {string} [$options.negativePrompt]
+	 *   @param {float}  [$options.promptStrength]
+	 *   @param {bool}   [$options.isRandom]
+	 *   @param {bool}   [$options.isTile]
+	 *   @param {int}    [$options.timeout=60]
 	 *   @param {callable} [$options.callback] function ($result)
-	 * @return {array} Either ['data' => binary, 'format' => 'png'] or ['error' => string]
+	 * @return {array} Either ['data'=>binary,'format'=>'png'] or ['error'=>string]
 	 */
 	public static function generate($prompt, $options = [])
 	{
@@ -163,6 +195,7 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 		$boundary = uniqid('hotpot');
 		$eol = "\r\n";
 		$body = '';
+
 		foreach ($form as $name => $val) {
 			$body .= "--$boundary$eol"
 			       . "Content-Disposition: form-data; name=\"$name\"$eol$eol"
@@ -203,5 +236,19 @@ class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
 			'data'   => $result['data'],
 			'format' => 'png'
 		);
+	}
+
+	/**
+	 * Detect whether a GD image resource has an alpha channel.
+	 *
+	 * @method imageHasAlpha
+	 * @protected
+	 * @param {resource} $img
+	 * @return {boolean}
+	 */
+	protected function imageHasAlpha($img)
+	{
+		if (!imageistruecolor($img)) return false;
+		return imagecolortransparent($img) >= 0;
 	}
 }

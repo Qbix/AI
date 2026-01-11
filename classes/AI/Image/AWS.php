@@ -4,18 +4,10 @@ use Aws\BedrockRuntime\BedrockRuntimeClient;
 
 class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 {
+	const JPEG_QUALITY = 85;
+
 	/**
 	 * Generates an image from a text prompt using AWS Bedrock.
-	 *
-	 * @method generate
-	 * @static
-	 * @param {string} $prompt The prompt to generate an image from
-	 * @param {array} $options Optional parameters:
-	 *   @param {string} [$options.model="stability.stable-diffusion-xl-v0"]
-	 *   @param {string} [$options.size="1024x1024"]
-	 *   @param {int}    [$options.steps=50]
-	 *   @param {callable} [$options.callback] function ($result)
-	 * @return {array} ['b64_json'=>string] or ['error'=>string]
 	 */
 	public function generate($prompt, $options = array())
 	{
@@ -60,7 +52,6 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 			$result['error'] = $e->getMessage();
 		}
 
-		// Invoke user callback if provided
 		if ($userCallback && is_callable($userCallback)) {
 			try {
 				call_user_func($userCallback, $result);
@@ -78,19 +69,6 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 
 	/**
 	 * Removes the background from an image using AWS Bedrock.
-	 * Uses Stability AI’s inpainting model (sd-remix) or Titan image generator.
-	 *
-	 * @method removeBackground
-	 * @static
-	 * @param {string} $image Binary or Base64-encoded PNG/JPG (no data URI prefix)
-	 * @param {array} $options Optional parameters:
-	 *   @param {string} [$options.model="stability.sd-remix"]
-	 *   @param {string} [$options.prompt="remove background"]
-	 *   @param {string} [$options.mask_source="background"]
-	 *   @param {string} [$options.format="png"]
-	 *   @param {int}    [$options.steps=40]
-	 *   @param {callable} [$options.callback] function ($result)
-	 * @return {array} ['data'=>binary,'format'=>string] or ['error'=>string]
 	 */
 	public function removeBackground($image, $options = array())
 	{
@@ -107,8 +85,33 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 			'error'  => null
 		];
 
+		// --- Normalize input image (JPEG vs PNG, no WebP) ---
+		$raw = Q_Utils::toRawBinary($image);
+		if ($raw === false) {
+			return ['error' => 'Invalid image input'];
+		}
+
+		$img = @imagecreatefromstring($raw);
+		if (!$img) {
+			return ['error' => 'Unable to decode image'];
+		}
+
+		$hasAlpha = $this->imageHasAlpha($img);
+
+		ob_start();
+		if ($hasAlpha || $format === 'png') {
+			imagepng($img);
+			$encoded = ob_get_clean();
+			$format  = 'png';
+		} else {
+			imagejpeg($img, null, self::JPEG_QUALITY);
+			$encoded = ob_get_clean();
+			$format  = 'jpg';
+		}
+		imagedestroy($img);
+
 		$payload = [
-			'image'         => Q_Utils::toBase64($image),
+			'image'         => base64_encode($encoded),
 			'mask_source'   => Q::ifset($options, 'mask_source', 'background'),
 			'text_prompts'  => [['text' => $prompt]],
 			'cfg_scale'     => 10,
@@ -133,6 +136,7 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 					$result['error'] = 'Invalid base64 output';
 				} else {
 					$result['data'] = $data;
+					$result['format'] = $format;
 				}
 			} else {
 				$result['error'] = json_encode($response);
@@ -141,7 +145,6 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 			$result['error'] = $e->getMessage();
 		}
 
-		// Invoke user callback if provided
 		if ($userCallback && is_callable($userCallback)) {
 			try {
 				call_user_func($userCallback, $result);
@@ -154,15 +157,14 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 			return ['error' => $result['error']];
 		}
 
-		return array(
+		return [
 			'data'   => $result['data'],
-			'format' => $format
-		);
+			'format' => $result['format']
+		];
 	}
 
 	/**
 	 * Cached Bedrock client
-	 * @return BedrockRuntimeClient
 	 */
 	protected function getClient()
 	{
@@ -182,5 +184,11 @@ class AI_Image_AWS extends AI_Image implements AI_Image_Interface
 			]);
 		}
 		return $client;
+	}
+
+	protected function imageHasAlpha($img)
+	{
+		if (!imageistruecolor($img)) return false;
+		return imagecolortransparent($img) >= 0;
 	}
 }

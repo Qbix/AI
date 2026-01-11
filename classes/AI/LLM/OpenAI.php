@@ -3,80 +3,7 @@
 class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
 {
 	/**
-	 * Creates a chat completion using OpenAI (LEGACY, TEXT-ONLY).
-	 *
-	 * Cheapest model, backward compatibility only.
-	 *
-	 * @method chatCompletions
-	 * @return {array}
-	 */
-	public function chatCompletions(array $messages, $options = array())
-	{
-		$apiKey = Q_Config::expect('AI', 'openAI', 'key');
-
-		$headers = array(
-			"Content-Type: application/json",
-			"Authorization: Bearer $apiKey"
-		);
-
-		$m = array();
-		foreach ($messages as $role => $content) {
-			$m[] = array(
-				'role'    => $role,
-				'content' => $content
-			);
-		}
-
-		$payload = array(
-			'model'       => Q::ifset($options, 'model', 'gpt-4o-mini'),
-			'max_tokens'  => Q::ifset($options, 'max_tokens', 3000),
-			'temperature' => Q::ifset($options, 'temperature', 0.5),
-			'messages'    => $m
-		);
-
-		$response = Q_Utils::post(
-			'https://api.openai.com/v1/chat/completions',
-			$payload,
-			null,
-			null,
-			$headers,
-			Q::ifset($options, 'timeout', 300)
-		);
-
-		$decoded = json_decode($response, true);
-
-		$content = '';
-		if (is_array($decoded)
-			&& isset($decoded['choices'][0]['message']['content'])
-			&& is_string($decoded['choices'][0]['message']['content'])
-		) {
-			$content = $decoded['choices'][0]['message']['content'];
-		}
-
-		return array(
-			'choices' => array(
-				array(
-					'message' => array(
-						'content' => $content
-					)
-				)
-			)
-		);
-	}
-
-	/**
 	 * Execute a model call using OpenAI's Responses API.
-	 *
-	 * Canonical execution path.
-	 * Returns normalized semantic text.
-	 *
-	 * @method executeModel
-	 * @param {string} $prompt
-	 * @param {array}  $inputs
-	 * @param {array}  $options
-	 * @param {array}  &$raw Optional provider-native response
-	 * @return {string}
-	 * @throws {Exception}
 	 */
 	public function executeModel($prompt, array $inputs, array $options = array(), &$raw = null)
 	{
@@ -101,11 +28,44 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
 			);
 		}
 
+		/**
+		 * Multimodal images
+		 * - Preserve JPEG / PNG
+		 * - Never send WebP
+		 * - Correct MIME in data URL
+		 */
 		if (!empty($inputs['images']) && is_array($inputs['images'])) {
 			foreach ($inputs['images'] as $binary) {
+
+				$raw = Q_Utils::toRawBinary($binary);
+				if ($raw === false) {
+					continue;
+				}
+
+				$img = @imagecreatefromstring($raw);
+				if (!$img) {
+					continue;
+				}
+
+				$hasAlpha = $this->imageHasAlpha($img);
+
+				if ($hasAlpha) {
+					ob_start();
+					imagepng($img);
+					$data = ob_get_clean();
+					$mime = 'image/png';
+				} else {
+					ob_start();
+					imagejpeg($img, null, 85);
+					$data = ob_get_clean();
+					$mime = 'image/jpeg';
+				}
+
+				imagedestroy($img);
+
 				$content[] = array(
 					'type' => 'input_image',
-					'image_url' => 'data:image/png;base64,' . base64_encode($binary)
+					'image_url' => 'data:' . $mime . ';base64,' . base64_encode($data)
 				);
 			}
 		}
@@ -122,31 +82,57 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
 			'temperature'      => Q::ifset($options, 'temperature', 0.5)
 		);
 
+		$callback = Q::ifset($options, 'callback', null);
+
 		$response = Q_Utils::post(
 			'https://api.openai.com/v1/responses',
 			$payload,
 			null,
 			null,
 			$headers,
-			Q::ifset($options, 'timeout', 300)
+			Q::ifset($options, 'timeout', 300),
+			$callback
+				? function ($info, $body) use ($callback, &$raw) {
+
+					$decoded = json_decode($body, true);
+					if (!is_array($decoded)) {
+						throw new Exception("Invalid Responses API envelope");
+					}
+
+					$raw = $decoded;
+					$result = $this->normalizeResponsesOutput($decoded);
+
+					call_user_func($callback, $result, $decoded, $info);
+				}
+				: null
 		);
 
+		// Batched mode
+		if ($callback) {
+			return $response;
+		}
+
+		// Non-batched mode
 		$decoded = json_decode($response, true);
 		if (!is_array($decoded)) {
 			throw new Exception("Invalid Responses API envelope");
 		}
 
-		// expose raw provider response if requested
 		$raw = $decoded;
-
 		return $this->normalizeResponsesOutput($decoded);
 	}
 
 	/**
+	 * Detect alpha channel
+	 */
+	protected function imageHasAlpha($img)
+	{
+		if (!imageistruecolor($img)) return false;
+		return imagecolortransparent($img) >= 0;
+	}
+
+	/**
 	 * Normalize OpenAI Responses output into semantic text.
-	 *
-	 * @param array $response
-	 * @return string
 	 */
 	protected function normalizeResponsesOutput(array $response)
 	{
@@ -155,7 +141,7 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
 		}
 
 		foreach ($response['output'] as $item) {
-			if (!isset($item['type']) || $item['type'] !== 'message') {
+			if (($item['type'] ?? null) !== 'message') {
 				continue;
 			}
 
@@ -164,8 +150,9 @@ class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
 			}
 
 			foreach ($item['content'] as $block) {
-				if (isset($block['type'], $block['text'])
-					&& $block['type'] === 'output_text'
+				if (
+					($block['type'] ?? null) === 'output_text'
+					&& isset($block['text'])
 					&& is_string($block['text'])
 				) {
 					return trim($block['text']);

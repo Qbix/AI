@@ -2,6 +2,8 @@
 
 class AI_Image_RemoveBG extends AI_Image implements AI_Image_Interface
 {
+	const JPEG_QUALITY = 85;
+
 	/**
 	 * Removes the background from an image using Remove.bg API.
 	 *
@@ -24,14 +26,16 @@ class AI_Image_RemoveBG extends AI_Image implements AI_Image_Interface
 		$url          = 'https://api.remove.bg/v1.0/removebg';
 		$userCallback = Q::ifset($options, 'callback', null);
 
-		$result = [
-			'data'   => null,
-			'format' => Q::ifset($options, 'format', 'png'),
-			'error'  => null
-		];
+		$requestedFormat = strtolower(Q::ifset($options, 'format', 'auto'));
 
-		$image = base64_decode($base64Image);
-		if ($image === false) {
+		$result = array(
+			'data'   => null,
+			'format' => $requestedFormat === 'auto' ? 'png' : $requestedFormat,
+			'error'  => null
+		);
+
+		$raw = base64_decode($base64Image, true);
+		if ($raw === false) {
 			$result['error'] = 'Invalid base64 image input';
 			if ($userCallback && is_callable($userCallback)) {
 				call_user_func($userCallback, $result);
@@ -39,15 +43,42 @@ class AI_Image_RemoveBG extends AI_Image implements AI_Image_Interface
 			return array('error' => $result['error']);
 		}
 
+		$img = @imagecreatefromstring($raw);
+		if (!$img) {
+			$result['error'] = 'Unable to decode image';
+			if ($userCallback && is_callable($userCallback)) {
+				call_user_func($userCallback, $result);
+			}
+			return array('error' => $result['error']);
+		}
+
+		$hasAlpha = $this->imageHasAlpha($img);
+
+		ob_start();
+		if ($hasAlpha || $requestedFormat === 'png' || $requestedFormat === 'auto') {
+			imagepng($img);
+			$encoded  = ob_get_clean();
+			$mime     = 'image/png';
+			$filename = 'image.png';
+			$sendFormat = 'png';
+		} else {
+			imagejpeg($img, null, self::JPEG_QUALITY);
+			$encoded  = ob_get_clean();
+			$mime     = 'image/jpeg';
+			$filename = 'image.jpg';
+			$sendFormat = 'jpg';
+		}
+		imagedestroy($img);
+
 		$boundary = uniqid('rb');
 		$eol = "\r\n";
 		$body = '';
 
-		$fields = [
+		$fields = array(
 			'size'   => Q::ifset($options, 'size', 'auto'),
 			'type'   => Q::ifset($options, 'type', 'auto'),
-			'format' => Q::ifset($options, 'format', 'auto'),
-		];
+			'format' => $sendFormat
+		);
 
 		if (!empty($options['bg_color'])) {
 			$fields['bg_color'] = $options['bg_color'];
@@ -63,16 +94,16 @@ class AI_Image_RemoveBG extends AI_Image implements AI_Image_Interface
 		}
 
 		$body .= "--$boundary$eol"
-		       . "Content-Disposition: form-data; name=\"image_file\"; filename=\"image.png\"$eol"
-		       . "Content-Type: application/octet-stream$eol$eol"
-		       . $image . $eol;
+		       . "Content-Disposition: form-data; name=\"image_file\"; filename=\"$filename\"$eol"
+		       . "Content-Type: $mime$eol$eol"
+		       . $encoded . $eol;
 
 		$body .= "--$boundary--$eol";
 
-		$headers = [
+		$headers = array(
 			"X-Api-Key: $apiKey",
 			"Content-Type: multipart/form-data; boundary=$boundary"
-		];
+		);
 
 		$response = Q_Utils::post(
 			$url,
@@ -86,11 +117,10 @@ class AI_Image_RemoveBG extends AI_Image implements AI_Image_Interface
 		if ($response === false) {
 			$result['error'] = 'HTTP or timeout error';
 		} else {
-			// check if response is valid image and return error message if not
 			if (!@imagecreatefromstring($response)) {
 				$json = json_decode($response, true);
-				if (json_last_error() == JSON_ERROR_NONE && !empty($json['errors'])) {
-					$messages = [];
+				if (json_last_error() === JSON_ERROR_NONE && !empty($json['errors'])) {
+					$messages = array();
 					foreach ($json['errors'] as $error) {
 						$title  = isset($error['title'])  ? $error['title']  : 'Unknown';
 						$detail = isset($error['detail']) ? $error['detail'] : '';
@@ -98,10 +128,11 @@ class AI_Image_RemoveBG extends AI_Image implements AI_Image_Interface
 					}
 					$result['error'] = implode(",\n", $messages);
 				} else {
-					$result['error'] = 'unknown error';
+					$result['error'] = 'Unknown error';
 				}
 			} else {
-				$result['data'] = $response;
+				$result['data']   = $response;
+				$result['format'] = $sendFormat;
 			}
 		}
 
@@ -121,5 +152,19 @@ class AI_Image_RemoveBG extends AI_Image implements AI_Image_Interface
 			'data'   => $result['data'],
 			'format' => $result['format']
 		);
+	}
+
+	/**
+	 * Detect whether a GD image resource has an alpha channel.
+	 *
+	 * @method imageHasAlpha
+	 * @protected
+	 * @param {resource} $img
+	 * @return {boolean}
+	 */
+	protected function imageHasAlpha($img)
+	{
+		if (!imageistruecolor($img)) return false;
+		return imagecolortransparent($img) >= 0;
 	}
 }

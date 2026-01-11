@@ -25,19 +25,7 @@ class AI_LLM_Google extends AI_LLM
 	/**
 	 * Execute a single Gemini model invocation.
 	 *
-	 * Contract:
-	 * - Exactly ONE HTTP request
-	 * - Supports text + image inputs
-	 * - Returns normalized semantic text
-	 * - Optional raw provider payload via &$raw
-	 *
-	 * @method executeModel
-	 * @param {string} $prompt
-	 * @param {array}  $inputs
-	 * @param {array}  $options
-	 * @param {array}  &$raw Optional raw provider response
-	 * @return {string}
-	 * @throws {Exception}
+	 * Supports sync + batch (callback) modes.
 	 */
 	public function executeModel($prompt, array $inputs, array $options = array(), &$raw = null)
 	{
@@ -46,7 +34,9 @@ class AI_LLM_Google extends AI_LLM
 		$temperature    = Q::ifset($options, 'temperature', 0.5);
 		$maxTokens      = Q::ifset($options, 'max_tokens', 3000);
 
-		/* ---------- System / schema enforcement (prompt-level only) ---------- */
+		$userCallback = Q::ifset($options, 'callback', null);
+
+		/* ---------- System / schema enforcement ---------- */
 
 		$system = '';
 
@@ -77,12 +67,46 @@ class AI_LLM_Google extends AI_LLM
 			$parts[] = array('text' => $inputs['text']);
 		}
 
-		if (!empty($inputs['images'])) {
-			foreach ($inputs['images'] as $img) {
+		/**
+		 * Multimodal images:
+		 * - JPEG preferred
+		 * - PNG only if alpha
+		 * - Never send WebP
+		 * - Correct mime_type always
+		 */
+		if (!empty($inputs['images']) && is_array($inputs['images'])) {
+			foreach ($inputs['images'] as $binary) {
+
+				$rawImg = Q_Utils::toRawBinary($binary);
+				if ($rawImg === false) {
+					continue;
+				}
+
+				$img = @imagecreatefromstring($rawImg);
+				if (!$img) {
+					continue;
+				}
+
+				$hasAlpha = $this->imageHasAlpha($img);
+
+				if ($hasAlpha) {
+					ob_start();
+					imagepng($img);
+					$data = ob_get_clean();
+					$mime = 'image/png';
+				} else {
+					ob_start();
+					imagejpeg($img, null, 85);
+					$data = ob_get_clean();
+					$mime = 'image/jpeg';
+				}
+
+				imagedestroy($img);
+
 				$parts[] = array(
 					'inline_data' => array(
-						'mime_type' => 'image/png',
-						'data'      => base64_encode($img)
+						'mime_type' => $mime,
+						'data'      => base64_encode($data)
 					)
 				);
 			}
@@ -101,40 +125,77 @@ class AI_LLM_Google extends AI_LLM
 			)
 		);
 
-		/* ---------- HTTP request ---------- */
+		$result = array(
+			'text'  => '',
+			'raw'   => null,
+			'error' => null
+		);
 
-		$ch = curl_init($this->endpoint);
-		curl_setopt_array($ch, array(
-			CURLOPT_POST           => true,
-			CURLOPT_HTTPHEADER     => array('Content-Type: application/json'),
-			CURLOPT_RETURNTRANSFER => true,
-			CURLOPT_POSTFIELDS     => json_encode($payload)
-		));
+		$callback = function ($info, $response) use (&$result, &$raw, $userCallback) {
 
-		$response = curl_exec($ch);
-		if ($response === false) {
-			$error = curl_error($ch);
-			curl_close($ch);
-			throw new Exception($error);
+			$httpCode = Q::ifset($info, 'http_code', 0);
+
+			if ($httpCode >= 200 && $httpCode < 300 && is_string($response)) {
+
+				$decoded = json_decode($response, true);
+				if (!is_array($decoded)) {
+					$result['error'] = 'Invalid JSON returned by Gemini';
+				} else {
+					$result['raw']  = $decoded;
+					$raw            = $decoded;
+					$result['text'] = $this->normalizeGeminiOutput($decoded);
+				}
+
+			} else {
+				$result['error'] = is_string($response)
+					? $response
+					: 'Gemini request failed';
+			}
+
+			if ($userCallback && is_callable($userCallback)) {
+				try {
+					call_user_func($userCallback, $result);
+				} catch (Exception $e) {
+					error_log($e);
+				}
+			}
+		};
+
+		$response = Q_Utils::post(
+			$this->endpoint,
+			$payload,
+			null,
+			null,
+			array('Content-Type: application/json'),
+			Q::ifset($options, 'timeout', 300),
+			$callback
+		);
+
+		// Batched / async mode
+		if (is_int($response)) {
+			return '';
 		}
-		curl_close($ch);
 
-		$decoded = json_decode($response, true);
-		if (!is_array($decoded)) {
-			throw new Exception('Invalid JSON returned by Gemini');
+		// Sync mode
+		if ($result['error']) {
+			throw new Exception($result['error']);
 		}
 
-		// expose raw provider payload if requested
-		$raw = $decoded;
+		$raw = $result['raw'];
+		return $result['text'];
+	}
 
-		return $this->normalizeGeminiOutput($decoded);
+	/**
+	 * Detect alpha channel
+	 */
+	protected function imageHasAlpha($img)
+	{
+		if (!imageistruecolor($img)) return false;
+		return imagecolortransparent($img) >= 0;
 	}
 
 	/**
 	 * Normalize Gemini response into semantic text.
-	 *
-	 * @param {array} $response
-	 * @return {string}
 	 */
 	protected function normalizeGeminiOutput(array $response)
 	{

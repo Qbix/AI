@@ -40,7 +40,7 @@ function AI_discourse_post()
 		$replyToPostNumber = intval($matches[3]);
 	} else {
 		$topicId           = $tail;
-		$replyToPostNumber = 1; // first post
+		$replyToPostNumber = 1;
 	}
 
 	// ensure user exists
@@ -84,59 +84,131 @@ function AI_discourse_post()
 	$byAuthor      = isset($target['name']) ? ' by ' . $target['name'] : '';
 
 	$languageClause = $languageName
-		? "Speak using $languageName language"
-		: "Speak in the same language as the $postOrComment";
+		? "Speak using $languageName language."
+		: "Speak in the same language as the $postOrComment.";
 
-	// generate response with LLM
-	$LLM = new AI_LLM_OpenAI();
+	// prompt templates
 	$instructions = array(
-		'agree + actionable' => "What follows is HTML of a $postOrComment$byAuthor. Write one or two paragraphs expressing agreement with the $postOrComment, without explicitly saying the words 'I agree'. Add interesting insights or ideas that can accomplish what is being discussed. The $postOrComment:\n" . $input,
-		'agree + emotive' => "What follows is HTML of a $postOrComment$byAuthor. Write one paragraph expressing agreement with the $postOrComment. Be enthusiastic and express emotion about the subject.\n$languageClause\nThe $postOrComment:\n" . $input,
-		'agree + expand' => "What follows is HTML of a $postOrComment$byAuthor. Write one sentence expressing general agreement with the $postOrComment$byAuthor (avoiding saying 'I agree'), but then two paragraphs discussing a much larger and more important vision everyone should consider.\n$languageClause\nThe $postOrComment:\n" . $input,
-		'agree + changeSubject' => "What follows is HTML of a $postOrComment$byAuthor. Write one sentence expressing general agreement (avoiding saying 'I agree'), but then two paragraphs discussing a related but different issue, and explain why it is more important. Maybe mention the author of the $postOrComment.\n$languageClause\nThe $postOrComment:\n" . $input,
-		'disagree + respectful' => "What follows is HTML of a $postOrComment$byAuthor. Write two sentences explaining the best reasons to disagree with this $postOrComment. Be very respectful but thorough.\n$languageClause\nThe $postOrComment:\n" . $input,
-		'disagree + emotive' => "What follows is HTML of a $postOrComment$byAuthor. Write two sentences explaining the best reasons to disagree with this $postOrComment. Use spunky and emotional language, and be opinionated, citing well known aphorisms.\n$languageClause\nThe $postOrComment:\n" . $input,
-		'disagree + absurd' => "What follows is HTML of a $postOrComment$byAuthor. Write a paragraph in the style of an internet forum, disagreeing with it, by using sarcastic examples and analogies that show why what is being advocated can actually be absurd. Avoid overly formal language and structure, speak plainly and to the point, without saying 'this $postOrComment'.\n$languageClause\nThe $postOrComment:\n" . $input,
-		'disagree + authority' => "What follows is HTML of a $postOrComment$byAuthor. Write a single paragraph mildly disagreeing with it (without saying 'mildly disagree' or 'this $postOrComment'), and naming other important authorities on the subject who also disagree, who haven't been mentioned yet, and summarizing their points. Avoid overly formal language and structure, speak plainly and to the point.\n$languageClause\nThe $postOrComment:\n" . $input
+		'agree + actionable' =>
+			"What follows is a $postOrComment$byAuthor.\n\n" .
+			"Write one or two paragraphs expressing agreement (without saying 'I agree'), " .
+			"and add actionable insights or ideas to help accomplish what is discussed.\n\n" .
+			"$languageClause\n\n$postOrComment:\n$input",
+
+		'agree + emotive' =>
+			"What follows is a $postOrComment$byAuthor.\n\n" .
+			"Write one enthusiastic paragraph expressing agreement and emotion.\n\n" .
+			"$languageClause\n\n$postOrComment:\n$input",
+
+		'agree + expand' =>
+			"What follows is a $postOrComment$byAuthor.\n\n" .
+			"Write one sentence expressing general agreement (avoid 'I agree'), " .
+			"then expand into two paragraphs describing a broader, more important vision.\n\n" .
+			"$languageClause\n\n$postOrComment:\n$input",
+
+		'agree + changeSubject' =>
+			"What follows is a $postOrComment$byAuthor.\n\n" .
+			"Write one sentence expressing general agreement, then pivot to a related but " .
+			"more important issue and explain why it matters more.\n\n" .
+			"$languageClause\n\n$postOrComment:\n$input",
+
+		'disagree + respectful' =>
+			"What follows is a $postOrComment$byAuthor.\n\n" .
+			"Write two sentences respectfully explaining the strongest reasons to disagree.\n\n" .
+			"$languageClause\n\n$postOrComment:\n$input",
+
+		'disagree + emotive' =>
+			"What follows is a $postOrComment$byAuthor.\n\n" .
+			"Write two opinionated, emotional sentences explaining why you disagree, " .
+			"using well-known aphorisms.\n\n" .
+			"$languageClause\n\n$postOrComment:\n$input",
+
+		'disagree + absurd' =>
+			"What follows is a $postOrComment$byAuthor.\n\n" .
+			"Write a sarcastic paragraph using analogies to show why the idea can be absurd. " .
+			"Keep it informal and direct.\n\n" .
+			"$languageClause\n\n$postOrComment:\n$input",
+
+		'disagree + authority' =>
+			"What follows is a $postOrComment$byAuthor.\n\n" .
+			"Write a paragraph disagreeing mildly, citing other respected authorities " .
+			"who also disagree and summarizing their viewpoints.\n\n" .
+			"$languageClause\n\n$postOrComment:\n$input"
 	);
 
-	$messages = array(
-		'system' => 'You are a forum member commenting.',
-		'user'   => $instructions[$attitude]
-	);
-	$completions = $LLM->chatCompletions($messages);
-	$choices     = Q::ifset($completions, 'choices', array());
-	$content     = '';
-	foreach ($choices as $choice) {
-		$content = $choice['message']['content'];
-		break;
+	if (empty($instructions[$attitude])) {
+		throw new Q_Exception_WrongType(array(
+			'field' => 'attitude',
+			'type'  => 'a valid discourse response attitude'
+		));
 	}
+
+	$LLM = new AI_LLM_OpenAI();
+
+	$prompt =
+		"You are a forum member writing a thoughtful reply.\n\n" .
+		$instructions[$attitude];
+
+	$response = $LLM->executeModel(
+		$prompt,
+		array('text' => $input),
+		array(
+			'temperature' => 0.7,
+			'max_tokens'  => 400
+		)
+	);
+
+	// this endpoint is sync-only
+	if (is_int($response)) {
+		throw new Q_Exception(
+			"AI_discourse_post() cannot run in batch / async mode"
+		);
+	}
+
+	$content = trim((string)$response);
 
 	// post back to forum
 	$result    = $uxt->postOnTopic($ret['id'], $content);
 	$postIndex = Q::ifset($result, 'post_number', null);
-	if (isset($postIndex)) {
+	if ($postIndex !== null) {
 		$postIndex = $postIndex - 1;
 	}
 
 	// save to Streams
-	$appId       = Q::app();
-	$communityId = Users::communityId();
+	$communityId  = Users::communityId();
 	$categoryName = 'Streams/external/posts';
-	Streams_Stream::fetchOrCreate($communityId, $communityId, $categoryName, array(
-		'type' => 'Streams/category'
-	));
-	Streams::create($communityId, $communityId, 'Streams/external/post', array(
-		'title'      => "By $username on $topicTitle",
-		'content'    => substr($content, 0, 2000),
-		'attributes' => compact('topicUrl', 'topicTitle', 'topicId', 'replyToPostNumber', 'postIndex', 'username', 'userId')
-	), array('relate' => array(
-		'publisherId' => $communityId,
-		'streamName'  => $categoryName,
-		'type'        => 'Streams/external/posts',
-		'weight'      => time()
-	)));
 
-	$username = $uxt->getExtra('username');
+	Streams_Stream::fetchOrCreate(
+		$communityId,
+		$communityId,
+		$categoryName,
+		array('type' => 'Streams/category')
+	);
+
+	Streams::create(
+		$communityId,
+		$communityId,
+		'Streams/external/post',
+		array(
+			'title'      => "By $username on $topicTitle",
+			'content'    => substr($content, 0, 2000),
+			'attributes' => compact(
+				'topicUrl',
+				'topicTitle',
+				'topicId',
+				'replyToPostNumber',
+				'postIndex',
+				'username',
+				'userId'
+			)
+		),
+		array('relate' => array(
+			'publisherId' => $communityId,
+			'streamName'  => $categoryName,
+			'type'        => 'Streams/external/posts',
+			'weight'      => time()
+		))
+	);
+
 	Q_Response::setSlot('data', compact('username', 'content'));
 }

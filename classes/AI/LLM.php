@@ -9,7 +9,6 @@
  * Design rules:
  * - executeModel() is the ONLY core primitive.
  * - Exactly ONE RPC per executeModel() call.
- * - chatCompletions() exists purely for legacy compatibility.
  *
  * No retries, no batching, no streaming, no policy logic here.
  */
@@ -20,41 +19,6 @@
 interface AI_LLM_Interface
 {
 	/**
-	 * Legacy chat-style invocation.
-	 *
-	 * This exists only to support older code paths that expect a
-	 * Chat Completions–style API.
-	 *
-	 * Implementations SHOULD translate this into exactly one
-	 * executeModel() call internally.
-	 *
-	 * @method chatCompletions
-	 *
-	 * @param {array} $messages
-	 *   Normalized chat messages:
-	 *   {
-	 *     system: string,
-	 *     user: array<{
-	 *       type: "text" | "image_url",
-	 *       text?: string,
-	 *       image_url?: { url: string }
-	 *     }>
-	 *   }
-	 *
-	 * @param {array} $options
-	 *   Provider-specific options (model, temperature, max_tokens, etc.)
-	 *
-	 * @return {array}
-	 *   Chat-style envelope:
-	 *   {
-	 *     choices: [
-	 *       { message: { content: string } }
-	 *     ]
-	 *   }
-	 */
-	function chatCompletions(array $messages, $options = array());
-
-	/**
 	 * Execute a single model invocation.
 	 *
 	 * This is the **core abstraction** used by all modern code.
@@ -62,7 +26,6 @@ interface AI_LLM_Interface
 	 *
 	 * This method:
 	 * - Performs exactly ONE RPC to the underlying model provider
-	 * - Does NOT call chatCompletions()
 	 * - Does NOT retry, batch, stream, or interpret output
 	 *
 	 * @method executeModel
@@ -109,6 +72,7 @@ interface AI_LLM_Interface
 	 *
 	 * @param {array} $options
 	 *   Provider-specific execution options, such as:
+     *   - callback (callable)
 	 *   - model
 	 *   - temperature
 	 *   - max_tokens
@@ -117,7 +81,10 @@ interface AI_LLM_Interface
 	 *   - timeout
      *   - some adapters might allow additional &$references to fill besides text
 	 *
-	 * @return {string} The model returns text requested.
+     *  @return {string|integer}
+     *   - In sync mode: string
+     *   - In batch / async mode: the index of the request,
+     *     make sure that you provide a callback to handle the actual result.
 	 */
 	function executeModel($prompt, array $inputs, array $options = array());
 }
@@ -127,73 +94,6 @@ interface AI_LLM_Interface
  */
 abstract class AI_LLM implements AI_LLM_Interface
 {
-	/**
-     * Legacy chat-style adapter.
-     *
-     * @deprecated
-     * This method exists ONLY for backward compatibility with
-     * chat-completions-style APIs.
-     *
-     * New code MUST call executeModel() directly.
-     *
-     * Internally, this method:
-     * - Flattens chat messages into a single prompt + inputs
-     * - Calls executeModel() exactly once
-     * - Wraps the raw result in a chat-style envelope
-     *
-     * No provider-specific behavior lives here.
-     */
-	public function chatCompletions(array $messages, $options = array())
-	{
-		$prompt = '';
-		$inputs = array(
-			'text'   => null,
-			'images' => array()
-		);
-
-		foreach ($messages as $role => $content) {
-			if ($role === 'system') {
-				$prompt .= $content . "\n\n";
-				continue;
-			}
-
-			if ($role === 'user' && is_array($content)) {
-				foreach ($content as $block) {
-					if (!is_array($block) || empty($block['type'])) {
-						continue;
-					}
-
-					if ($block['type'] === 'text') {
-						$inputs['text'] =
-							(string)Q::ifset($inputs, 'text', '') . $block['text'];
-					} elseif ($block['type'] === 'image_url') {
-						$inputs['images'][] = base64_decode(
-							preg_replace(
-								'#^data:image/\w+;base64,#',
-								'',
-								$block['image_url']['url']
-							)
-						);
-					}
-				}
-			}
-		}
-
-		$result = $this->executeModel($prompt, $inputs, $options);
-
-		return array(
-			'choices' => array(
-				array(
-					'message' => array(
-						'content' => is_string($result)
-							? $result
-							: json_encode($result)
-					)
-				)
-			)
-		);
-	}
-
 	/**
 	 * Execute a single model invocation.
 	 *
@@ -265,14 +165,13 @@ abstract class AI_LLM implements AI_LLM_Interface
 			$prompt = Q::interpolate($prompt, $interpolate);
 		}
 
-		$response = $this->executeModel($prompt, $inputs, $options);
-
-		$data = json_decode($response, true);
-		if (!is_array($data)) {
-			throw new Q_Exception("Model did not return valid JSON");
-		}
-
-		return $data;
+		return $this->_executeWithCallback($prompt, $inputs, $options, function ($raw) {
+            $data = json_decode($raw, true);
+            if (!is_array($data)) {
+                throw new Q_Exception("Model did not return valid JSON");
+            }
+            return $data;
+        });
 	}
 
 
@@ -414,37 +313,33 @@ abstract class AI_LLM implements AI_LLM_Interface
     $text
 HEREDOC;
 
-        $response = $this->executeModel(
-            $instructions,
-            array('text' => $text),
-            $options
-        );
+        return $this->_executeWithCallback($instructions, compact('text'), $options, function ($raw) {
+            $content = is_array($raw)
+                ? json_encode($raw)
+                : (string)$raw;
 
-        $content = is_array($response)
-            ? json_encode($response)
-            : (string)$response;
+            $content = trim(preg_replace('/^```.*?\n|\n```$/s', '', $content));
 
-        $content = trim(preg_replace('/^```.*?\n|\n```$/s', '', $content));
+            preg_match('/<title>(.*?)<\/title>/s', $content, $t);
+            preg_match('/<keywords>(.*?)<\/keywords>/s', $content, $k);
+            preg_match('/<summary>(.*?)<\/summary>/s', $content, $s);
+            preg_match('/<speakers>(.*?)<\/speakers>/s', $content, $sp);
 
-        preg_match('/<title>(.*?)<\/title>/s', $content, $t);
-        preg_match('/<keywords>(.*?)<\/keywords>/s', $content, $k);
-        preg_match('/<summary>(.*?)<\/summary>/s', $content, $s);
-        preg_match('/<speakers>(.*?)<\/speakers>/s', $content, $sp);
+            $title = trim(isset($t[1]) ? $t[1] : '');
+            $summary = trim(isset($s[1]) ? $s[1] : '');
+            $speakers = trim(isset($sp[1]) ? $sp[1] : '');
+            $keywordsString = trim(isset($k[1]) ? $k[1] : '');
 
-        $title = trim($t[1] ?? '');
-        $summary = trim($s[1] ?? '');
-        $speakers = trim($sp[1] ?? '');
-        $keywordsString = trim($k[1] ?? '');
+            $keywords = $keywordsString !== ''
+                ? preg_split('/\s*,\s*/', $keywordsString)
+                : array();
 
-        $keywords = $keywordsString !== ''
-            ? preg_split('/\s*,\s*/', $keywordsString)
-            : array();
+            if (strtolower($speakers) === 'no names') {
+                $speakers = '';
+            }
 
-        if (strtolower($speakers) === 'no names') {
-            $speakers = '';
-        }
-
-        return compact('title', 'keywords', 'summary', 'speakers');
+            return compact('title', 'keywords', 'summary', 'speakers');
+        });
     }
 
     /**
@@ -492,34 +387,31 @@ HEREDOC;
     Output only the keyword line.
     HEREDOC;
 
-        $response = $this->executeModel(
-            $prompt,
-            array('text' => $original),
-            array_merge(
-                array(
-                    'temperature' => $temperature,
-                    'max_tokens' => 2000
-                ),
-                $options
-            )
-        );
+        return $this->_executeWithCallback($prompt, array(
+            'text' => $original
+        ), array_merge(
+            array(
+                'temperature' => $temperature,
+                'max_tokens' => 2000
+            ),
+            $options
+        ), function ($raw) {
+            $content = is_array($raw)
+                ? json_encode($raw)
+                : (string)$raw;
 
-        $content = is_array($response)
-            ? json_encode($response)
-            : (string)$response;
+            $content = trim(preg_replace('/^```.*?\n|\n```$/s', '', $content));
 
-        $content = trim(preg_replace('/^```.*?\n|\n```$/s', '', $content));
+            $expanded = preg_split('/\s*,\s*/', $content);
+            $expanded = array_unique(
+                array_filter(
+                    array_map('strtolower', $expanded)
+                )
+            );
 
-        $expanded = preg_split('/\s*,\s*/', $content);
-        $expanded = array_unique(
-            array_filter(
-                array_map('strtolower', $expanded)
-            )
-        );
-
-        return array_values($expanded);
+            return array_values($expanded);
+        });
     }
-
 
     /**
 	 * Use this function to merge all the files under AI/observations config,
@@ -686,6 +578,12 @@ HEREDOC;
 			unset($attributes['title']);
 		}
 
+        while (!empty($attributes['keywords'])
+        and 1000 < strlen(Q::json_encode($attributes, Q::JSON_FORCE_OBJECT))) {
+            $attributes['keywords'] = array_slice($attributes['keywords'], 0, -1);
+            $attributes['keywordsNative'] = array_slice($attributes['keywordsNative'], 0, -1);
+        }
+
         $publisherId = Q::ifset($options, 'publisherId', Q::app());
 		return Streams::create(
 			'AI',
@@ -811,4 +709,32 @@ HEREDOC;
 		return $out;
 	}
 
+    protected function _executeWithCallback($prompt, array $inputs, array $options, $parser)
+    {
+        $callback = Q::ifset($options, 'callback', null);
+
+        $response = $this->executeModel(
+            $prompt,
+            $inputs,
+            array_merge($options, array(
+                'callback' => function ($result) use ($parser, $callback) {
+                    if (is_array($result) && isset($result['text'])) {
+                        $raw = $result['text'];
+                    } else {
+                        $raw = $result;
+                    }
+                    $parsed = call_user_func($parser, $raw);
+                    if ($callback && is_callable($callback)) {
+                        call_user_func($callback, $parsed);
+                    }
+                }
+            ))
+        );
+
+        if (is_int($response)) {
+            return $response;
+        }
+
+        return $response;
+    }
 }

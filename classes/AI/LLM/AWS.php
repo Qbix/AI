@@ -25,19 +25,7 @@ class AI_LLM_AWS extends AI_LLM
 	/**
 	 * Execute a single model invocation against AWS Bedrock (Claude).
 	 *
-	 * Contract:
-	 * - Exactly ONE invokeModel() call
-	 * - Multimodal inputs are ignored (Claude has no vision)
-	 * - Returns normalized semantic text
-	 * - Optionally exposes raw provider response via &$raw
-	 *
-	 * @method executeModel
-	 * @param {string} $prompt
-	 * @param {array}  $inputs
-	 * @param {array}  $options
-	 * @param {array}  &$raw Optional raw provider payload
-	 * @return {string}
-	 * @throws {Exception}
+	 * Supports callback mode for batching compatibility.
 	 */
 	public function executeModel($prompt, array $inputs, array $options = array(), &$raw = null)
 	{
@@ -47,9 +35,11 @@ class AI_LLM_AWS extends AI_LLM
 		$temperature = Q::ifset($options, 'temperature', 0.5);
 		$maxTokens   = Q::ifset($options, 'max_tokens', 3000);
 
+		$userCallback = Q::ifset($options, 'callback', null);
+
 		$fullPrompt = '';
 
-		/* ---------- JSON / schema enforcement (prompt-level only) ---------- */
+		/* ---------- JSON / schema enforcement ---------- */
 
 		if ($responseFormat === 'json_schema' && is_array($schema)) {
 			$fullPrompt .=
@@ -76,7 +66,7 @@ class AI_LLM_AWS extends AI_LLM
 			$fullPrompt .= $inputs['text'] . "\n\n";
 		}
 
-		// Claude does NOT support images — explicitly ignore
+		// Claude has no vision support
 		if (!empty($inputs['images'])) {
 			$fullPrompt .= "[Image inputs omitted]\n\n";
 		}
@@ -92,29 +82,55 @@ class AI_LLM_AWS extends AI_LLM
 			'stop_sequences'       => array("\n\nHuman:", "\n\nAssistant:")
 		);
 
-		$response = $this->client->invokeModel(array(
-			'modelId'     => $this->modelId,
-			'body'        => json_encode($payload),
-			'contentType' => 'application/json',
-			'accept'      => 'application/json'
-		));
+		$result = array(
+			'text'  => '',
+			'raw'   => null,
+			'error' => null
+		);
 
-		$decoded = json_decode($response['body']->getContents(), true);
-		if (!is_array($decoded)) {
-			throw new Exception('Invalid JSON returned by Bedrock');
+		try {
+			$response = $this->client->invokeModel(array(
+				'modelId'     => $this->modelId,
+				'body'        => json_encode($payload),
+				'contentType' => 'application/json',
+				'accept'      => 'application/json'
+			));
+
+			$decoded = json_decode($response['body']->getContents(), true);
+			if (!is_array($decoded)) {
+				throw new Exception('Invalid JSON returned by Bedrock');
+			}
+
+			$result['raw']  = $decoded;
+			$result['text'] = $this->normalizeClaudeOutput($decoded);
+			$raw = $decoded;
+
+		} catch (Exception $e) {
+			$result['error'] = $e->getMessage();
 		}
 
-		// expose raw provider payload if requested
-		$raw = $decoded;
+		/* ---------- Callback mode ---------- */
 
-		return $this->normalizeClaudeOutput($decoded);
+		if ($userCallback && is_callable($userCallback)) {
+			try {
+				call_user_func($userCallback, $result);
+			} catch (Exception $e) {
+				error_log($e);
+			}
+			return '';
+		}
+
+		/* ---------- Sync mode ---------- */
+
+		if ($result['error']) {
+			throw new Exception($result['error']);
+		}
+
+		return $result['text'];
 	}
 
 	/**
-	 * Normalize Claude (Bedrock) output into semantic text.
-	 *
-	 * @param {array} $response
-	 * @return {string}
+	 * Normalize Claude output into semantic text.
 	 */
 	protected function normalizeClaudeOutput(array $response)
 	{

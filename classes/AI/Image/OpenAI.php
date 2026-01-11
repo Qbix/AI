@@ -2,6 +2,8 @@
 
 class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
 {
+	const JPEG_QUALITY = 85;
+
 	/**
 	 * Generate an image via OpenAI Images API.
 	 *
@@ -39,7 +41,6 @@ class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
 
 		/**
 		 * Transport-level callback
-		 * ALWAYS called as ($info, $responseBody)
 		 */
 		$callback = function ($info, $response) use (&$result, $format, $userCallback) {
 
@@ -56,7 +57,7 @@ class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
 						$result['error'] = 'Failed to decode image data';
 					} else {
 						$converted = $this->convertFromPng($pngBinary, $format);
-						if (!$converted) {
+						if ($converted === false) {
 							$result['error'] = 'Image format conversion failed';
 						} else {
 							$result['data'] = $converted;
@@ -109,42 +110,44 @@ class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
 		}
 
 		// -------------------------------
-		// IMAGE-BASED GENERATION
+		// IMAGE-BASED GENERATION / EDITS
 		// -------------------------------
 		else {
-            $raw = Q_Utils::toRawBinary(reset($images));
-            if ($raw === false) {
-                return array('error' => 'Invalid image input');
-            }
+			$raw = Q_Utils::toRawBinary(reset($images));
+			if ($raw === false) {
+				return array('error' => 'Invalid image input');
+			}
 
-            $tmp = tempnam(sys_get_temp_dir(), 'ai_img_');
-            file_put_contents($tmp, $raw);
+			$encoded = $this->encodeForUpload($raw);
+			if (!$encoded) {
+				return array('error' => 'Image encoding failed');
+			}
 
-            $postFields = array(
-                'model'  => $model,
-                'prompt' => $prompt,
-                'image'  => new CURLFile($tmp, 'image/png'),
-                'size'   => $size,
-                'n'      => 1
-            );
+			$postFields = array(
+				'model'  => $model,
+				'prompt' => $prompt,
+				'image'  => new CURLFile($encoded['path'], $encoded['mime']),
+				'size'   => $size,
+				'n'      => 1
+			);
 
-            $response = Q_Utils::post(
-                'https://api.openai.com/v1/images/edits',
-                $postFields,
-                null,
-                null, // IMPORTANT: let Q_Utils build multipart
-                array(
-                    "Authorization: Bearer $apiKey",
-                    "Content-Type: multipart/form-data"
-                ),
-                $timeout,
-                $callback
-            );
+			$response = Q_Utils::post(
+				'https://api.openai.com/v1/images/edits',
+				$postFields,
+				null,
+				null,
+				array(
+					"Authorization: Bearer $apiKey",
+					"Content-Type: multipart/form-data"
+				),
+				$timeout,
+				$callback
+			);
 
-            @unlink($tmp);
-        }
+			@unlink($encoded['path']);
+		}
 
-		// Batch mode: callback fills result later
+		// Batch mode
 		if (is_int($response)) {
 			return $result;
 		}
@@ -157,6 +160,38 @@ class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
 	}
 
 	/**
+	 * Encode input image for OpenAI upload.
+	 * - JPEG if opaque
+	 * - PNG only if alpha exists
+	 * - Never upload WebP
+	 */
+	protected function encodeForUpload($binary)
+	{
+		$img = @imagecreatefromstring($binary);
+		if (!$img) return false;
+
+		$hasAlpha = $this->imageHasAlpha($img);
+
+		if ($hasAlpha) {
+			$tmp = tempnam(sys_get_temp_dir(), 'ai_img_') . '.png';
+			imagepng($img, $tmp);
+			imagedestroy($img);
+			return array('path' => $tmp, 'mime' => 'image/png');
+		}
+
+		$tmp = tempnam(sys_get_temp_dir(), 'ai_img_') . '.jpg';
+		imagejpeg($img, $tmp, self::JPEG_QUALITY);
+		imagedestroy($img);
+		return array('path' => $tmp, 'mime' => 'image/jpeg');
+	}
+
+	protected function imageHasAlpha($img)
+	{
+		if (!imageistruecolor($img)) return false;
+		return imagecolortransparent($img) >= 0;
+	}
+
+	/**
 	 * Convert OpenAI PNG output to requested format
 	 */
 	protected function convertFromPng($pngBinary, $format)
@@ -166,14 +201,11 @@ class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
 		}
 
 		$img = @imagecreatefromstring($pngBinary);
-		if (!$img) {
-			return false;
-		}
+		if (!$img) return false;
 
 		$w = imagesx($img);
 		$h = imagesy($img);
 
-		// Flatten alpha for JPG
 		$canvas = imagecreatetruecolor($w, $h);
 		$white = imagecolorallocate($canvas, 255, 255, 255);
 		imagefill($canvas, 0, 0, $white);
@@ -183,14 +215,14 @@ class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
 		switch ($format) {
 			case 'jpg':
 			case 'jpeg':
-				imagejpeg($canvas, null, 85);
+				imagejpeg($canvas, null, self::JPEG_QUALITY);
 				break;
 			case 'webp':
 				if (!function_exists('imagewebp')) {
 					ob_end_clean();
 					return false;
 				}
-				imagewebp($canvas, null, 85);
+				imagewebp($canvas, null, self::JPEG_QUALITY);
 				break;
 			default:
 				ob_end_clean();

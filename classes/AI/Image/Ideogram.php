@@ -2,36 +2,26 @@
 
 class AI_Image_Ideogram extends AI_Image implements AI_Image_Interface
 {
+	const JPEG_QUALITY = 85;
+
 	public function generate($prompt, $options = array())
 	{
-		$apiKey = Q_Config::expect('AI', 'ideogram', 'key');
+		$apiKey       = Q_Config::expect('AI', 'ideogram', 'key');
 		$userCallback = Q::ifset($options, 'callback', null);
-		$timeout = Q::ifset($options, 'timeout', 60);
+		$timeout      = Q::ifset($options, 'timeout', 60);
 
-		// Decide transparent or normal endpoint
 		$background = Q::ifset($options, 'background', 'none');
 		$endpoint = ($background === 'transparent')
 			? '/v1/ideogram-v3/generate-transparent'
 			: '/v1/ideogram-v3/generate';
 
-		// Resolution / aspect ratio
-		if (!empty($options['size']) && preg_match('/^(\d+)x(\d+)$/', $options['size'], $m)) {
-			$resolution = "{$m[1]}x{$m[2]}";
-		} else {
-			$resolution = Q::ifset($options, 'resolution', null);
-			if (!$resolution) {
-				$w = Q::ifset($options, 'width', 1024);
-				$h = Q::ifset($options, 'height', 1024);
-				$resolution = "{$w}x{$h}";
-			}
-		}
+		$resolution = $this->resolveResolution($options);
 
-		// Build form fields
 		$postFields = array(
-			'prompt' => $prompt,
-			'num_images' => Q::ifset($options, 'num_images', 1),
-			'rendering_speed' => Q::ifset($options, 'rendering_speed', 'DEFAULT'),
-			'magic_prompt' => Q::ifset($options, 'magic_prompt', 'OFF'),
+			'prompt'           => $prompt,
+			'num_images'       => Q::ifset($options, 'num_images', 1),
+			'rendering_speed'  => Q::ifset($options, 'rendering_speed', 'DEFAULT'),
+			'magic_prompt'     => Q::ifset($options, 'magic_prompt', 'OFF')
 		);
 
 		if ($resolution) {
@@ -44,24 +34,25 @@ class AI_Image_Ideogram extends AI_Image implements AI_Image_Interface
 			$postFields['negative_prompt'] = $options['negative_prompt'];
 		}
 
-		// Attach optional file lists
 		$tmpFiles = array();
 		$this->attachReferenceImages($postFields, $options, $tmpFiles);
 
-		return $this->doIdeogramRequest($apiKey, $endpoint, $postFields, $tmpFiles, $timeout, $userCallback);
+		return $this->doIdeogramRequest(
+			$apiKey, $endpoint, $postFields, $tmpFiles, $timeout, $userCallback
+		);
 	}
 
 	public function edit($imageData, $maskData, $prompt, $options = array())
 	{
-		$apiKey = Q_Config::expect('AI', 'ideogram', 'key');
+		$apiKey       = Q_Config::expect('AI', 'ideogram', 'key');
 		$userCallback = Q::ifset($options, 'callback', null);
-		$timeout = Q::ifset($options, 'timeout', 60);
+		$timeout      = Q::ifset($options, 'timeout', 60);
 
 		$postFields = array(
-			'prompt' => $prompt,
+			'prompt'          => $prompt,
+			'num_images'      => Q::ifset($options, 'num_images', 1),
 			'rendering_speed' => Q::ifset($options, 'rendering_speed', 'DEFAULT'),
-			'num_images' => Q::ifset($options, 'num_images', 1),
-			'magic_prompt' => Q::ifset($options, 'magic_prompt', 'OFF'),
+			'magic_prompt'    => Q::ifset($options, 'magic_prompt', 'OFF')
 		);
 
 		if (!empty($options['style_type'])) {
@@ -70,68 +61,140 @@ class AI_Image_Ideogram extends AI_Image implements AI_Image_Interface
 
 		$tmpFiles = array();
 
-		// Attach main image
-		$mainTmp = tempnam(sys_get_temp_dir(), 'ideo_edit_') . '.png';
-		file_put_contents($mainTmp, Q_Utils::toRawBinary($imageData));
-		$postFields['image'] = new CURLFile($mainTmp, 'image/png');
-		$tmpFiles[] = $mainTmp;
+		// Main image: PNG only if mask exists
+		$needsAlpha = !empty($maskData);
+		$main = $this->encodeImage($imageData, $needsAlpha);
+		$postFields['image'] = new CURLFile($main['path'], $main['mime']);
+		$tmpFiles[] = $main['path'];
 
-		// Attach mask file
-		$maskTmp = tempnam(sys_get_temp_dir(), 'ideo_mask_') . '.png';
-		file_put_contents($maskTmp, Q_Utils::toRawBinary($maskData));
-		$postFields['mask'] = new CURLFile($maskTmp, 'image/png');
-		$tmpFiles[] = $maskTmp;
+		// Mask: ALWAYS PNG
+		if (!empty($maskData)) {
+			$mask = $this->encodeImage($maskData, true);
+			$postFields['mask'] = new CURLFile($mask['path'], 'image/png');
+			$tmpFiles[] = $mask['path'];
+		}
 
-		$endpoint = '/v1/ideogram-v3/edit';
-		return $this->doIdeogramRequest($apiKey, $endpoint, $postFields, $tmpFiles, $timeout, $userCallback);
+		return $this->doIdeogramRequest(
+			$apiKey,
+			'/v1/ideogram-v3/edit',
+			$postFields,
+			$tmpFiles,
+			$timeout,
+			$userCallback
+		);
 	}
 
-	// Common shared submission logic
+	/* ====================== helpers ====================== */
+
+	protected function resolveResolution($options)
+	{
+		if (!empty($options['size'])
+			&& preg_match('/^(\d+)x(\d+)$/', $options['size'], $m)) {
+			return "{$m[1]}x{$m[2]}";
+		}
+
+		$resolution = Q::ifset($options, 'resolution', null);
+		if ($resolution) return $resolution;
+
+		$w = Q::ifset($options, 'width', 1024);
+		$h = Q::ifset($options, 'height', 1024);
+		return "{$w}x{$h}";
+	}
+
+	protected function encodeImage($binary, $forcePng = false)
+	{
+		$raw = Q_Utils::toRawBinary($binary);
+		if ($raw === false) return null;
+
+		$img = @imagecreatefromstring($raw);
+		if (!$img) return null;
+
+		$hasAlpha = $forcePng || $this->imageHasAlpha($img);
+
+		if ($hasAlpha) {
+			$tmp = tempnam(sys_get_temp_dir(), 'ideo_') . '.png';
+			imagepng($img, $tmp);
+			imagedestroy($img);
+			return array('path' => $tmp, 'mime' => 'image/png');
+		}
+
+		$tmp = tempnam(sys_get_temp_dir(), 'ideo_') . '.jpg';
+		imagejpeg($img, $tmp, self::JPEG_QUALITY);
+		imagedestroy($img);
+		return array('path' => $tmp, 'mime' => 'image/jpeg');
+	}
+
+	protected function imageHasAlpha($img)
+	{
+		if (!imageistruecolor($img)) return false;
+		return imagecolortransparent($img) >= 0;
+	}
+
+	protected function attachReferenceImages(&$postFields, $options, &$tmpFiles)
+	{
+		if (empty($options['character_reference_images'])
+			|| !is_array($options['character_reference_images'])) {
+			return;
+		}
+
+		foreach ($options['character_reference_images'] as $i => $binary) {
+			$img = $this->encodeImage($binary, false);
+			if (!$img) continue;
+
+			$postFields["character_reference_images[$i]"]
+				= new CURLFile($img['path'], $img['mime']);
+			$tmpFiles[] = $img['path'];
+
+			// Optional mask → PNG
+			if (!empty($options['character_reference_images_mask'][$i])) {
+				$mask = $this->encodeImage(
+					$options['character_reference_images_mask'][$i],
+					true
+				);
+				if ($mask) {
+					$postFields["character_reference_images_mask[$i]"]
+						= new CURLFile($mask['path'], 'image/png');
+					$tmpFiles[] = $mask['path'];
+				}
+			}
+		}
+	}
+
 	protected function doIdeogramRequest(
 		$apiKey, $endpoint, &$postFields, &$tmpFiles, $timeout, $userCallback
 	) {
 		$result = array('data' => null, 'format' => 'png', 'error' => null);
 
 		$callback = function ($info, $response) use (&$result, $userCallback, &$tmpFiles) {
-			// Always delete temp files
 			foreach ($tmpFiles as $tmp) {
 				@unlink($tmp);
 			}
 
 			$httpCode = Q::ifset($info, 'http_code', 0);
-			if ($httpCode >= 200 && $httpCode < 300 && is_string($response)) {
+			if ($httpCode >= 200 && $httpCode < 300) {
 				$json = json_decode($response, true);
 				if (!empty($json['data'][0]['url'])) {
-					$url = $json['data'][0]['url'];
-					$binary = @file_get_contents($url);
-					if ($binary === false) {
-						$result['error'] = 'Download failed';
-					} else {
+					$binary = @file_get_contents($json['data'][0]['url']);
+					if ($binary !== false) {
 						$result['data'] = $binary;
+						return;
 					}
-				} else {
-					$result['error'] = $json;
 				}
+				$result['error'] = $json ?: 'Invalid Ideogram payload';
 			} else {
-				$result['error'] = is_string($response)
-					? (json_decode($response, true) ?: $response)
-					: 'Invalid Ideogram response';
+				$result['error'] = $response;
 			}
 
 			if ($userCallback && is_callable($userCallback)) {
-				try {
-					call_user_func($userCallback, $result);
-				} catch (Exception $e) {
-					error_log($e);
-				}
+				call_user_func($userCallback, $result);
 			}
 		};
 
-		$response = Q_Utils::post(
+		return Q_Utils::post(
 			'https://api.ideogram.ai' . $endpoint,
 			$postFields,
 			null,
-			null, // multipart
+			null,
 			array(
 				"Api-Key: $apiKey",
 				"Content-Type: multipart/form-data"
@@ -139,37 +202,5 @@ class AI_Image_Ideogram extends AI_Image implements AI_Image_Interface
 			$timeout,
 			$callback
 		);
-
-		return is_int($response) ? $result
-			: ($result['error'] ? array('error' => $result['error']) : $result);
-	}
-
-	// Shared logic for adding character/reference image files and optional masks
-	protected function attachReferenceImages(&$postFields, $options, &$tmpFiles)
-	{
-		if (!empty($options['character_reference_images'])
-			&& is_array($options['character_reference_images'])) {
-
-			foreach ($options['character_reference_images'] as $i => $binary) {
-				$raw = Q_Utils::toRawBinary($binary);
-				if ($raw === false) continue;
-
-				$tmp = tempnam(sys_get_temp_dir(), 'ideo_ref_') . '.png';
-				file_put_contents($tmp, $raw);
-				$postFields["character_reference_images[$i]"] = new CURLFile($tmp, 'image/png');
-				$tmpFiles[] = $tmp;
-
-				// Attach mask if provided
-				if (!empty($options['character_reference_images_mask'][$i])) {
-					$maskRaw = Q_Utils::toRawBinary($options['character_reference_images_mask'][$i]);
-					if ($maskRaw !== false) {
-						$maskTmp = tempnam(sys_get_temp_dir(), 'ideo_ref_mask_') . '.png';
-						file_put_contents($maskTmp, $maskRaw);
-						$postFields["character_reference_images_mask[$i]"] = new CURLFile($maskTmp, 'image/png');
-						$tmpFiles[] = $maskTmp;
-					}
-				}
-			}
-		}
 	}
 }

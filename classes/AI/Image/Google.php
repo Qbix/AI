@@ -2,6 +2,8 @@
 
 class AI_Image_Google extends AI_Image implements AI_Image_Interface
 {
+	const JPEG_QUALITY = 85;
+
 	public function generate($prompt, $options = array())
 	{
 		$proxyUrl = rtrim(Q_Config::expect('AI', 'google', 'url'), '/');
@@ -28,21 +30,17 @@ class AI_Image_Google extends AI_Image implements AI_Image_Interface
 			'feather'    => $feather
 		);
 
-		// Remove nulls
 		foreach ($postFields as $k => $v) {
-			if ($v === null) {
-				unset($postFields[$k]);
-			}
+			if ($v === null) unset($postFields[$k]);
 		}
 
-		// === Signature: MINIMUM ONLY (clientId + timestamp) ===
+		// === Signature (clientId + timestamp only) ===
 		$signature = hash_hmac(
 			'sha256',
 			$clientId . $timestamp,
 			$secret
 		);
 
-		// IMPORTANT: force multipart for Q_Utils
 		$headers = array(
 			"X-Client-ID: $clientId",
 			"X-Timestamp: $timestamp",
@@ -56,14 +54,29 @@ class AI_Image_Google extends AI_Image implements AI_Image_Interface
 
 		if (is_array($images)) {
 			foreach (array_slice($images, 0, 5) as $i => $binary) {
+
 				$raw = Q_Utils::toRawBinary($binary);
 				if ($raw === false) continue;
 
-				$tmp = tempnam(sys_get_temp_dir(), 'ai_img_');
-				file_put_contents($tmp, $raw);
+				$img = @imagecreatefromstring($raw);
+				if (!$img) continue;
+
+				$hasAlpha = $this->imageHasAlpha($img);
+
+				if ($hasAlpha) {
+					$tmp = tempnam(sys_get_temp_dir(), 'ai_img_') . '.png';
+					imagepng($img, $tmp);
+					$mime = 'image/png';
+				} else {
+					$tmp = tempnam(sys_get_temp_dir(), 'ai_img_') . '.jpg';
+					imagejpeg($img, $tmp, self::JPEG_QUALITY);
+					$mime = 'image/jpeg';
+				}
+
+				imagedestroy($img);
 
 				$postFields['photo' . ($i + 1)] =
-					new CURLFile($tmp, 'image/png');
+					new CURLFile($tmp, $mime);
 
 				$tmpFiles[] = $tmp;
 			}
@@ -80,7 +93,6 @@ class AI_Image_Google extends AI_Image implements AI_Image_Interface
 			$userCallback,
 			$tmpFiles
 		) {
-			// ALWAYS cleanup temp files
 			foreach ($tmpFiles as $tmp) {
 				@unlink($tmp);
 			}
@@ -111,13 +123,12 @@ class AI_Image_Google extends AI_Image implements AI_Image_Interface
 			$proxyUrl . '/generate',
 			$postFields,
 			null,
-			null, // IMPORTANT: do NOT pass empty array here
+			null,
 			$headers,
 			Q::ifset($options, 'timeout', 60),
 			$callback
 		);
 
-		// Batch / async mode → return immediately
 		if (is_int($response)) {
 			return $result;
 		}
@@ -138,5 +149,11 @@ class AI_Image_Google extends AI_Image implements AI_Image_Interface
 			Q::ifset($options, 'prompt', 'remove background'),
 			$options
 		);
+	}
+
+	protected function imageHasAlpha($img)
+	{
+		if (!imageistruecolor($img)) return false;
+		return imagecolortransparent($img) >= 0;
 	}
 }

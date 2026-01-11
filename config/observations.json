@@ -56,17 +56,12 @@
             },
 
             "timing": {
-                "promptClause": "Infer when this content would be relevant in the real world. Provide exact date ranges for the years 2025 and 2026 only. Use real holidays or events if clearly implied. Do not invent holidays. If no timing is evident, return an empty array.",
+                "promptClause": "Set evergreen to 0 if this event is only at a specific time during the year, otehrwise 1",
                 "fieldNames": [
-                    "dates",
                     "evergreen"
                 ],
                 "example": {
-                    "dates": [
-                        ["2025-01-07", "2025-01-07"],
-                        ["2026-01-07", "2026-01-07"]
-                    ],
-                    "evergreen": 5
+                    "evergreen": 0
                 }
             },
 
