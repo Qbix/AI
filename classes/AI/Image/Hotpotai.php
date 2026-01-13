@@ -1,6 +1,6 @@
 <?php
 
-class AI_Image_HotpotAI extends AI_Image implements AI_Image_Interface
+class AI_Image_Hotpotai extends AI_Image implements AI_Image_Interface
 {
 	const JPEG_QUALITY = 85;
 

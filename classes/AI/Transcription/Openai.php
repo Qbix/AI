@@ -10,7 +10,7 @@
  * @extends AI_Transcription
  * @implements AI_Transcription_Interface
  */
-class AI_Transcription_OpenAI extends AI_Transcription implements AI_Transcription_Interface
+class AI_Transcription_Openai extends AI_Transcription implements AI_Transcription_Interface
 {
 	/**
 	 * In-memory job store (request lifetime only).

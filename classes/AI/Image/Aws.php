@@ -2,7 +2,7 @@
 
 use Aws\BedrockRuntime\BedrockRuntimeClient;
 
-class AI_Image_AWS extends AI_Image implements AI_Image_Interface
+class AI_Image_Aws extends AI_Image implements AI_Image_Interface
 {
 	const JPEG_QUALITY = 85;
 

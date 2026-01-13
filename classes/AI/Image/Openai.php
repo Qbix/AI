@@ -1,6 +1,6 @@
 <?php
 
-class AI_Image_OpenAI extends AI_Image implements AI_Image_Interface
+class AI_Image_Openai extends AI_Image implements AI_Image_Interface
 {
 	const JPEG_QUALITY = 85;
 

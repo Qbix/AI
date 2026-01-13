@@ -2,7 +2,7 @@
 
 use Aws\BedrockRuntime\BedrockRuntimeClient;
 
-class AI_LLM_AWS extends AI_LLM
+class AI_LLM_Aws extends AI_LLM
 {
 	protected $client;
 	protected $modelId;

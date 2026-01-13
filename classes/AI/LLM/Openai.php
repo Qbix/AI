@@ -1,6 +1,6 @@
 <?php
 
-class AI_LLM_OpenAI extends AI_LLM implements AI_LLM_Interface
+class AI_LLM_Openai extends AI_LLM implements AI_LLM_Interface
 {
 	/**
 	 * Execute a model call using OpenAI's Responses API.

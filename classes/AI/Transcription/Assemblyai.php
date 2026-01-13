@@ -1,6 +1,6 @@
 <?php
 
-class AI_Transcription_AssemblyAI extends AI_Transcription implements AI_Transcription_Interface
+class AI_Transcription_Assemblyai extends AI_Transcription implements AI_Transcription_Interface
 {
     /**
      * Create a transcript from a media file that is accessible via a URL.

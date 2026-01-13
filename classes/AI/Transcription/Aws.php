@@ -13,7 +13,7 @@ use Aws\TranscribeService\TranscribeServiceClient;
  * @extends AI_Transcription
  * @implements AI_Transcription_Interface
  */
-class AI_Transcription_AWS extends AI_Transcription implements AI_Transcription_Interface
+class AI_Transcription_Aws extends AI_Transcription implements AI_Transcription_Interface
 {
 	/**
 	 * @property client
