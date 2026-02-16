@@ -554,7 +554,7 @@ HEREDOC;
      * @param {array} [$options] Behavior overrides
      * @param {string} [$options.adapter] LLM adapter name
      * @param {callable|true} [$options.accept] Acceptance callback, set to true to always accept
-     * @return {Streams_Stream|false} Created stream or false
+     * @return {Streams_Stream|false} Created stream or false if stream failed policy gate
      */
 	static function createStream(
 		$streamType,

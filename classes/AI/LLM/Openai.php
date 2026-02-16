@@ -127,8 +127,14 @@ class AI_LLM_Openai extends AI_LLM implements AI_LLM_Interface
 	 */
 	protected function imageHasAlpha($img)
 	{
-		if (!imageistruecolor($img)) return false;
-		return imagecolortransparent($img) >= 0;
+		if (!imageistruecolor($img)) {
+			return false;
+		}
+		$transparent = imagecolortransparent($img) >= 0;
+		if ($transparent >= 0) {
+			return true;
+		}
+		return imagealphablending($img) === false;
 	}
 
 	/**
@@ -141,7 +147,7 @@ class AI_LLM_Openai extends AI_LLM implements AI_LLM_Interface
 		}
 
 		foreach ($response['output'] as $item) {
-			if (($item['type'] ?? null) !== 'message') {
+			if (Q::ifset($item, 'type', null) !== 'message') {
 				continue;
 			}
 
@@ -149,15 +155,14 @@ class AI_LLM_Openai extends AI_LLM implements AI_LLM_Interface
 				continue;
 			}
 
+			$out = '';
 			foreach ($item['content'] as $block) {
-				if (
-					($block['type'] ?? null) === 'output_text'
-					&& isset($block['text'])
-					&& is_string($block['text'])
-				) {
-					return trim($block['text']);
+				if (isset($block['type']) && $block['type'] === 'output_text'
+					&& isset($block['text']) && is_string($block['text'])) {
+					$out .= $block['text'] . "\n";
 				}
 			}
+			return trim($out);
 		}
 
 		return '';

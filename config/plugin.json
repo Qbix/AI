@@ -48,6 +48,9 @@
 	"AI": {
 		"observations": {
 			"AI": "observations.json"
+		},
+		"images": {
+			"batch": 2
 		}
 	}
 }

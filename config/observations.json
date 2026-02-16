@@ -94,7 +94,7 @@
             },
 
             "discoveryQuality": {
-                "promptClause": "Evaluate how suitable this content is for discovery and sharing by others. Besides this, derive most common 10 keywords as single English words people might use to search for this. Normalize to lowercase alphanumeric only. If the primary language is English, set keywordsNative to empty array. Otherwise, fill keywordsNative with top 10 keywords as single words in that language.",
+                "promptClause": "Evaluate how suitable this content is for discovery and sharing by others. Derive the most common 10 keywords as single English words people might use to search for this. Normalize to lowercase alphanumeric only. If visible text is present in a non-English language, you MUST also derive keywordsNative from that visible text, even if the holiday name is English. If visible text is present in a non-English language, keywordsNative must not be empty.",
                 "fieldNames": [
                     "shareability",
                     "confidence",
@@ -106,6 +106,16 @@
                     "keywordsNative": ["Православный", "Рождество", "Религиозный", "Праздник"],
                     "shareability": 8,
                     "confidence": 0.9
+                }
+            },
+
+            "subtitleGeneration": {
+                "promptClause": "Generate a short, neutral subtitle suitable for a notification for this holiday. The subtitle must work for both festive and solemn holidays. Avoid celebratory wording for solemn holidays. 6-14 words. Do not mention the year. No emojis. No quotes. Use the primary language visible in the image, excluding the holiday name itself. If no holiday is present, return null.",
+                "fieldNames": [
+                    "subtitle"
+                ],
+                "example": {
+                    "subtitle": "A moment to reflect and share with others"
                 }
             }
         }
