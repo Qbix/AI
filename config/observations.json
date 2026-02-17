@@ -2,7 +2,7 @@
     "Streams/image": {
         "holiday": {
             "semanticExtraction": {
-                "promptClause": "First, extract explicit semantic facts visible in the image. Do not infer or invent text. If something is not clearly present, return null. Assume the current year is {{currentYear}}. If a known holiday is clearly referenced, identify it and give its date range for this year only. Use YYYY-MM-DD format.",
+                "promptClause": "First, extract explicit semantic facts visible in the image. Do not infer or invent text that is not visible. If something is not clearly present in the image itself, return null for that field. Assume the current year is {{currentYear}}. If a known holiday is clearly referenced by name or greeting in the image, identify the holidayName. Then, using your internal calendar knowledge for the specified year only, provide the best-known Gregorian date range for that holiday in YYYY-MM-DD format. Prefer widely accepted civil calendar dates. If the holiday is lunar or moon-sighting dependent, provide the most commonly published civil date range for that year (not speculative future estimates). If you are uncertain about the exact dates, still provide your best-known estimate for that year rather than leaving the fields null.",
                 "fieldNames": [
                     "title",
                     "subtitle",
@@ -110,7 +110,7 @@
             },
 
             "subtitleGeneration": {
-                "promptClause": "Generate a short, neutral subtitle suitable for a notification for this holiday. The subtitle must work for both festive and solemn holidays. Avoid celebratory wording for solemn holidays. 6-14 words. Do not mention the year. No emojis. No quotes. Use the primary language visible in the image, excluding the holiday name itself. If no holiday is present, return null.",
+                "promptClause": "Generate an expression of personal, heartfelt wishes suitable and appropriate for this holiday. The subtitle must work for both festive and solemn holidays. Avoid celebratory wording for solemn holidays. Do not mention the year. No emojis. No quotes. Use the primary language visible in the image, excluding the holiday name itself. Aim for 1-2 full sentences.",
                 "fieldNames": [
                     "subtitle"
                 ],
