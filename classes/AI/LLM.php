@@ -342,76 +342,106 @@ HEREDOC;
         });
     }
 
-    /**
-     * Expand a list of canonical keywords into related terms for search indexing.
-     * 
-     * This method sends the given keywords to the language model and requests
-     * expansion into related search terms. It is intended to be used both
-     * during content insertion and during query processing.
-     * 
-     * When used during insert time, the model is encouraged to expand the keywords
-     * broadly and include synonyms, alternate phrasings, and variations.
-     * 
-     * When used during query time, the expansion is narrower and more literal,
-     * intended to match only closely relevant synonyms or rephrasings that improve recall.
-     * 
-     * @method keywords
-     * @param {array} $keywords An array of 1-word or 2-word canonical keyword strings.
-     * @param {string} $during Either 'insert' or 'query' to control expansion depth.
-     * @param {array} [$options=array()] Optional OpenAI options like model or temperature.
-     * @return {array} An array of expanded keyword terms (strings), deduplicated and lowercased.
-     */
-    function keywords(array $keywords, $during = 'insert', $options = array())
-    {
-        if (empty($keywords)) return array();
+	/**
+	 * Expand a list of canonical keywords into related terms for search indexing.
+	 * 
+	 * This method sends the given keywords to the language model and requests
+	 * expansion into related search terms. It is intended to be used both
+	 * during content insertion and during query processing.
+	 * 
+	 * When used during insert time, the model is encouraged to expand the keywords
+	 * broadly and include synonyms, alternate phrasings, and variations.
+	 * 
+	 * When used during query time, the expansion is narrower and more literal,
+	 * intended to match only closely relevant synonyms or rephrasings that improve recall.
+	 *
+	 * If $options['language'] is provided and is not "en", the model is asked
+	 * to additionally return native-language keywords in a second line.
+	 *
+	 * @method keywords
+	 * @param {array} $keywords An array of 1-word or 2-word canonical keyword strings.
+	 * @param {string} $during Either 'insert' or 'query' to control expansion depth.
+	 * @param {array} [$options=array()] Optional LLM options like model, temperature, language.
+	 * @param {array|null} [&$keywordsNative=null] Filled with native-language keywords if language != "en"
+	 * @return {array} An array of expanded keyword terms (strings), deduplicated and lowercased.
+	 */
+	function keywords(array $keywords, $during = 'insert', $options = array(), &$keywordsNative = null)
+	{
+		if (empty($keywords)) {
+			if (func_num_args() >= 4) {
+				$keywordsNative = array();
+			}
+			return array();
+		}
 
-        $original = implode(', ', $keywords);
-        $temperature = ($during === 'query') ? 0.3 : 0.7;
+		$original = implode(', ', $keywords);
+		$temperature = ($during === 'query') ? 0.3 : 0.7;
+		$language = Q::ifset($options, 'language', 'en');
 
-        $prompt = <<<HEREDOC
-    Expand the following canonical search keywords into useful query terms.
+		$prompt = <<<HEREDOC
+	Expand the following canonical search keywords into useful query terms.
 
-    Input:
-    $original
+	Input:
+	$original
 
-    Rules:
-    - Output a single line
-    - Comma-separated
-    - Max 1000 terms
-    - Each term must be 1 or 2 words
-    - No punctuation other than commas
-    - No duplicates
-    - No sentences
-    - Highly relevant only
+	Rules:
+	- Output lines exactly as specified below
+	- Comma-separated
+	- Max 1000 terms per line
+	- Each term must be 1 or 2 words
+	- No punctuation other than commas
+	- No duplicates
+	- No sentences
+	- Highly relevant only
 
-    Output only the keyword line.
-    HEREDOC;
+	Output:
+	Line 1: English keywords
 
-        return $this->_executeWithCallback($prompt, array(
-            'text' => $original
-        ), array_merge(
-            array(
-                'temperature' => $temperature,
-                'max_tokens' => 2000
-            ),
-            $options
-        ), function ($raw) {
-            $content = is_array($raw)
-                ? json_encode($raw)
-                : (string)$raw;
+	HEREDOC;
 
-            $content = trim(preg_replace('/^```.*?\n|\n```$/s', '', $content));
+		if ($language && strtolower($language) !== 'en') {
+			$prompt .= <<<HEREDOC
+	Line 2: {$language} keywords (native language only)
+	HEREDOC;
+		}
 
-            $expanded = preg_split('/\s*,\s*/', $content);
-            $expanded = array_unique(
-                array_filter(
-                    array_map('strtolower', $expanded)
-                )
-            );
+		return $this->_executeWithCallback($prompt, array(
+			'text' => $original
+		), array_merge(
+			array(
+				'temperature' => $temperature,
+				'max_tokens' => 2000
+			),
+			$options
+		), function ($raw) use (&$keywordsNative, $language) {
 
-            return array_values($expanded);
-        });
-    }
+			$content = is_array($raw)
+				? json_encode($raw)
+				: (string)$raw;
+
+			$content = trim(preg_replace('/^```.*?\n|\n```$/s', '', $content));
+
+			$lines = preg_split('/\r?\n/', trim($content));
+			$englishLine = isset($lines[0]) ? $lines[0] : '';
+			$nativeLine = isset($lines[1]) ? $lines[1] : '';
+
+			$english = array_values(array_unique(array_filter(array_map(
+				'strtolower',
+				preg_split('/\s*,\s*/', $englishLine)
+			))));
+
+			if ($language && strtolower($language) !== 'en' && func_num_args() >= 4) {
+				$keywordsNative = array_values(array_unique(array_filter(array_map(
+					'mb_strtolower',
+					preg_split('/\s*,\s*/', $nativeLine)
+				))));
+			} else if (func_num_args() >= 4) {
+				$keywordsNative = array();
+			}
+
+			return $english;
+		});
+	}
 
     /**
 	 * Use this function to merge all the files under AI/observations config,
