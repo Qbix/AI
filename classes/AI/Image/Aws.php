@@ -12,7 +12,14 @@ class AI_Image_Aws extends AI_Image implements AI_Image_Interface
 	public function generate($prompt, $options = array())
 	{
 		$client       = $this->getClient();
-		$modelId      = Q::ifset($options, 'model', 'stability.stable-diffusion-xl-v0');
+		$defaultModel = Q_Config::get(
+			'AI',
+			'images',
+			'aws',
+			'model',
+			'stability.stable-diffusion-xl-v0'
+		);
+		$modelId = Q::ifset($options, 'model', $defaultModel);
 		$size         = Q::ifset($options, 'size', '1024x1024');
 		$steps        = Q::ifset($options, 'steps', 50);
 		$userCallback = Q::ifset($options, 'callback', null);

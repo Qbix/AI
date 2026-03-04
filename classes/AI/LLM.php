@@ -3,94 +3,203 @@
  * Base interfaces and abstractions for Large Language Model (LLM) adapters.
  *
  * This file defines a **provider-agnostic execution contract** that cleanly
- * supports OpenAI, Google Gemini, and AWS Bedrock (Claude) without leaking
- * provider-specific semantics into application code.
+ * supports OpenAI (Responses API), Google Gemini, and AWS Bedrock / Anthropic Claude
+ * without leaking provider-specific semantics into application code.
  *
- * Design rules:
- * - executeModel() is the ONLY core primitive.
- * - Exactly ONE RPC per executeModel() call.
+ * Core design principles:
  *
- * No retries, no batching, no streaming, no policy logic here.
+ * 1. executeModel() is the ONLY primitive.
+ * 2. Exactly ONE RPC is performed per call.
+ * 3. No retries, batching, streaming, orchestration, or policy logic here.
+ *
+ * This layer represents a **pure model execution boundary**.
+ *
+ * Higher-level orchestration (workflows, tool execution, retries,
+ * policy enforcement, etc.) must occur outside this interface.
+ *
+ * Conversation semantics
+ * ----------------------
+ *
+ * Modern LLM APIs operate on an **ordered timeline of messages**.
+ *
+ * Messages must be interpreted **chronologically**. Ordering is critical.
+ *
+ * Logical hierarchy used by most models:
+ *
+ * system / developer instructions
+ * ↓
+ * tool outputs
+ * ↓
+ * assistant messages
+ * ↓
+ * user messages
+ *
+ * When conflicts occur, higher levels override lower levels.
+ *
+ * Providers map this hierarchy differently:
+ *
+ * OpenAI Responses API
+ *   system → instructions
+ *   user → input role=user
+ *   assistant → role=assistant
+ *   tool outputs → role=tool
+ *
+ * Anthropic Claude
+ *   system → system
+ *   user → role=user
+ *   assistant → role=assistant
+ *   tool outputs → type=tool_result
+ *
+ * Google Gemini
+ *   system → system_instruction
+ *   user → role=user
+ *   assistant → role=model
+ *   tool outputs → tool parts
+ *
+ * This interface abstracts those differences.
  */
 
 /**
  * Interface AI_LLM_Interface
+ *
+ * Provider adapters MUST implement this interface.
  */
 interface AI_LLM_Interface
 {
 	/**
 	 * Execute a single model invocation.
 	 *
-	 * This is the **core abstraction** used by all modern code.
-	 * Provider adapters MUST implement this.
+	 * This performs **exactly one RPC** to the underlying model provider.
 	 *
-	 * This method:
-	 * - Performs exactly ONE RPC to the underlying model provider
-	 * - Does NOT retry, batch, stream, or interpret output
+	 * Adapters MUST NOT:
+	 * - retry requests
+	 * - batch requests
+	 * - orchestrate tools
+	 * - manage conversations
+	 *
+	 * Those behaviors belong to higher layers.
 	 *
 	 * @method executeModel
 	 *
-	 * @param {string} $prompt
-	 *   Fully constructed instruction block.
-	 *   This is provider-agnostic text that frames the task
-	 *   (system prompt, rules, schema instructions, etc.).
+	 * @param {string} $instructions
+	 *   System / developer instructions.
+	 *
+	 *   This text defines the **rules, constraints, schemas, and task framing**
+	 *   that govern the model's behavior.
+	 *
+	 *   Examples:
+	 *   - task definitions
+	 *   - JSON schema instructions
+	 *   - output format rules
+	 *   - safety constraints
+	 *
+	 *   Provider mappings:
+	 *
+	 *   OpenAI → instructions
+	 *   Claude → system
+	 *   Gemini → system_instruction
 	 *
 	 * @param {array} $inputs
-	 *   Multimodal inputs passed to the model.
+	 *   Multimodal artifacts supplied to the model.
 	 *
-	 *   Canonical structure (all keys optional unless stated):
+	 *   These represent **binary or external artifacts** rather than
+	 *   conversational messages.
+	 *
+	 *   Canonical structure:
 	 *
 	 *   {
-	 *     text: string|null,
-	 *       - Primary textual input.
-	 *       - Used by all providers.
-	 *
 	 *     images: array<binary>,
-	 *       - Raw binary image data (PNG/JPEG).
-	 *       - Supported by OpenAI (Responses API) and Google Gemini.
-	 *       - NOT supported by AWS Bedrock Claude (must be ignored or stubbed).
+	 *       Raw binary image data (PNG/JPEG).
 	 *
 	 *     pdfs: array<binary>,
-	 *       - Optional document binaries.
-	 *       - Currently supported only by some Gemini endpoints.
-	 *       - Safe to ignore for providers that do not support it.
+	 *       Optional document binaries.
 	 *
 	 *     audio: array<binary>,
-	 *       - Future-facing input for speech/audio models.
-	 *       - Not currently used by default adapters.
+	 *       Future-facing speech/audio input.
 	 *
 	 *     video: array<binary>,
-	 *       - Future-facing input for video-capable models.
-	 *       - Not currently used by default adapters.
+	 *       Future-facing video input.
 	 *
-	 *     artifacts: array<mixed>,
-	 *       - Provider-specific or experimental payloads.
-	 *       - Examples: tool call context, intermediate state,
-	 *         or externally-produced embeddings.
-	 *       - Adapters MAY ignore this entirely.
+	 *     artifacts: array<mixed>
+	 *       Arbitrary external artifacts such as:
+	 *       - embeddings
+	 *       - structured metadata
+	 *       - pipeline outputs
 	 *   }
 	 *
 	 * @param {array} $options
-	 *   Provider-specific execution options, such as:
-     *   - callback (callable)
-	 *   - model
-	 *   - temperature
-	 *   - max_tokens
-	 *   - response_format ("json", "json_schema")
-	 *   - json_schema
-	 *   - timeout
-     *   - some adapters might allow additional &$references to fill besides text
+	 *   Execution and conversation configuration.
 	 *
-     *  @return {string|integer}
-     *   - In sync mode: string
-     *   - In batch / async mode: the index of the request,
-     *     make sure that you provide a callback to handle the actual result.
+	 *   Conversation timeline
+	 *   ---------------------
+	 *
+	 *   messages: array|null
+	 *
+	 *   Ordered message list representing the conversation.
+	 *
+	 *   Canonical structure:
+	 *
+	 *   [
+	 *     { role: "user", content: string|array },
+	 *     { role: "assistant", content: string|array },
+	 *     { role: "tool", name: string, content: mixed }
+	 *   ]
+	 *
+	 *   Content may be:
+	 *
+	 *   - plain text
+	 *   - multimodal blocks
+	 *   - structured tool outputs
+	 *
+	 *   Adapters must translate this structure into the provider's format.
+	 *
+	 *   Legacy compatibility fields
+	 *   ---------------------------
+	 *
+	 *   These MAY still appear for backwards compatibility but SHOULD NOT
+	 *   be used by new code. Adapters may convert them into `messages`.
+	 *
+	 *   user: string
+	 *   assistant: string|array
+	 *   context: string|array
+	 *   tool_results: array
+	 *
+	 *   Execution parameters
+	 *   --------------------
+	 *
+	 *   model: string
+	 *     Provider model name.
+	 *
+	 *   temperature: number
+	 *     Sampling temperature.
+	 *
+	 *   max_tokens: number
+	 *     Maximum output tokens.
+	 *
+	 *   response_format: string
+	 *     "json" or "json_schema".
+	 *
+	 *   json_schema: object
+	 *     JSON schema definition when response_format = json_schema.
+	 *
+	 *   timeout: number
+	 *     Network timeout seconds.
+	 *
+	 *   callback: callable
+	 *     Optional async callback handler.
+	 *
+	 * @return {string|integer}
+	 *   Sync mode → model output text.
+	 *
+	 *   Async / batch mode → integer request index.
 	 */
-	function executeModel($prompt, array $inputs, array $options = array());
+	function executeModel($instructions, array $inputs, array $options = array());
 }
 
 /**
  * Abstract base class AI_LLM
+ *
+ * Provides common helper behavior shared across adapters.
  */
 abstract class AI_LLM implements AI_LLM_Interface
 {
@@ -102,7 +211,7 @@ abstract class AI_LLM implements AI_LLM_Interface
 	 * @method executeModel
 	 * @abstract
 	 */
-	abstract public function executeModel($prompt, array $inputs, array $options = array());
+	abstract public function executeModel($instructions, array $inputs, array $options = array());
 
     /**
 	 * Process multimodal inputs through observation evaluation.

@@ -1,25 +1,28 @@
 <?php
 
-class AI_LLM_Google extends AI_LLM
+class AI_LLM_Google extends AI_LLM implements AI_LLM_Interface
 {
 	protected $apiKey;
 	protected $model;
-	protected $endpoint;
 
 	function __construct()
 	{
 		$this->apiKey = Q_Config::expect('AI', 'google', 'api_key');
-		$this->model  = Q_Config::get(
+
+		$defaultGoogleModel = Q_Config::get(
 			'AI',
 			'google',
 			'llm_model',
 			'models/gemini-1.5-flash'
 		);
 
-		$this->endpoint =
-			'https://generativelanguage.googleapis.com/v1beta/' .
-			$this->model .
-			':generateContent?key=' . urlencode($this->apiKey);
+		$this->model = Q_Config::get(
+			'AI',
+			'llm',
+			'models',
+			'google',
+			$defaultGoogleModel
+		);
 	}
 
 	/**
@@ -27,7 +30,7 @@ class AI_LLM_Google extends AI_LLM
 	 *
 	 * Supports sync + batch (callback) modes.
 	 */
-	public function executeModel($prompt, array $inputs, array $options = array(), &$raw = null)
+	public function executeModel($instructions, array $inputs, array $options = array(), &$raw = null)
 	{
 		$responseFormat = Q::ifset($options, 'response_format', null);
 		$schema         = Q::ifset($options, 'json_schema', null);
@@ -35,6 +38,13 @@ class AI_LLM_Google extends AI_LLM
 		$maxTokens      = Q::ifset($options, 'max_tokens', 3000);
 
 		$userCallback = Q::ifset($options, 'callback', null);
+
+		$model = Q::ifset($options, 'model', $this->model);
+
+		$endpoint =
+			'https://generativelanguage.googleapis.com/v1beta/' .
+			$model .
+			':generateContent?key=' . urlencode($this->apiKey);
 
 		/* ---------- System / schema enforcement ---------- */
 
@@ -59,9 +69,13 @@ class AI_LLM_Google extends AI_LLM
 
 		/* ---------- Build Gemini contents ---------- */
 
-		$parts = array(
-			array('text' => $system . $prompt)
-		);
+		$parts = array();
+
+		if (!empty($instructions)) {
+			$parts[] = array('text' => $system . $instructions);
+		} else {
+			$parts[] = array('text' => $system);
+		}
 
 		if (!empty($inputs['text'])) {
 			$parts[] = array('text' => $inputs['text']);
@@ -162,7 +176,7 @@ class AI_LLM_Google extends AI_LLM
 		};
 
 		$response = Q_Utils::post(
-			$this->endpoint,
+			$endpoint,
 			$payload,
 			null,
 			null,

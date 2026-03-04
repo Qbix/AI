@@ -2,24 +2,39 @@
 
 class AI_LLM_Openai extends AI_LLM implements AI_LLM_Interface
 {
+	protected $model;
+
+	function __construct()
+	{
+		$defaultModel = 'gpt-4.1-mini';
+
+		$this->model = Q_Config::get(
+			'AI',
+			'llm',
+			'models',
+			'openai',
+			$defaultModel
+		);
+	}
+
 	/**
 	 * Execute a model call using OpenAI's Responses API.
 	 */
-	public function executeModel($prompt, array $inputs, array $options = array(), &$raw = null)
+	public function executeModel($instructions, array $inputs, array $options = array(), &$raw = null)
 	{
 		$apiKey = Q_Config::expect('AI', 'openAI', 'key');
+
+		$model = Q::ifset($options, 'model', $this->model);
 
 		$headers = array(
 			"Content-Type: application/json",
 			"Authorization: Bearer $apiKey"
 		);
 
-		$content = array(
-			array(
-				'type' => 'input_text',
-				'text' => $prompt
-			)
-		);
+		/**
+		 * Build multimodal user content
+		 */
+		$content = array();
 
 		if (!empty($inputs['text'])) {
 			$content[] = array(
@@ -37,12 +52,12 @@ class AI_LLM_Openai extends AI_LLM implements AI_LLM_Interface
 		if (!empty($inputs['images']) && is_array($inputs['images'])) {
 			foreach ($inputs['images'] as $binary) {
 
-				$raw = Q_Utils::toRawBinary($binary);
-				if ($raw === false) {
+				$rawBinary = Q_Utils::toRawBinary($binary);
+				if ($rawBinary === false) {
 					continue;
 				}
 
-				$img = @imagecreatefromstring($raw);
+				$img = @imagecreatefromstring($rawBinary);
 				if (!$img) {
 					continue;
 				}
@@ -70,17 +85,90 @@ class AI_LLM_Openai extends AI_LLM implements AI_LLM_Interface
 			}
 		}
 
+		/**
+		 * Build message timeline
+		 */
+		$messages = array();
+
+		if (!empty($options['messages']) && is_array($options['messages'])) {
+
+			foreach ($options['messages'] as $msg) {
+
+				$role = Q::ifset($msg, 'role', 'user');
+				$contentMsg = Q::ifset($msg, 'content', '');
+
+				if (is_string($contentMsg)) {
+					$contentMsg = array(
+						array(
+							'type' => 'input_text',
+							'text' => $contentMsg
+						)
+					);
+				}
+
+				$messages[] = array(
+					'role' => $role,
+					'content' => $contentMsg
+				);
+			}
+
+		} else {
+
+			/**
+			 * Legacy behaviour (existing adapter behavior)
+			 */
+			$userContent = array();
+
+			foreach ($content as $c) {
+				$userContent[] = $c;
+			}
+
+			$messages[] = array(
+				'role' => 'user',
+				'content' => $userContent
+			);
+		}
+
+		/**
+		 * Payload
+		 */
 		$payload = array(
-			'model' => Q::ifset($options, 'model', 'gpt-4.1-mini'),
-			'input' => array(
-				array(
-					'role'    => 'user',
-					'content' => $content
-				)
-			),
+			'model' => $model,
+			'input' => $messages,
 			'max_output_tokens' => Q::ifset($options, 'max_tokens', 3000),
-			'temperature'      => Q::ifset($options, 'temperature', 0.5)
+			'temperature' => Q::ifset($options, 'temperature', 0.5)
 		);
+
+		/**
+		 * System instructions
+		 */
+		if (!empty($instructions)) {
+			$payload['instructions'] = $instructions;
+		}
+
+		/**
+		 * Structured output support
+		 */
+		$responseFormat = Q::ifset($options, 'response_format', null);
+		$jsonSchema = Q::ifset($options, 'json_schema', null);
+
+		if ($responseFormat === 'json_schema' && is_array($jsonSchema)) {
+
+			$payload['response_format'] = array(
+				'type' => 'json_schema',
+				'json_schema' => $jsonSchema
+			);
+
+		} elseif ($responseFormat === 'json') {
+
+			$payload['response_format'] = array(
+				'type' => 'json_object'
+			);
+
+		} elseif (!empty($responseFormat)) {
+
+			$payload['response_format'] = $responseFormat;
+		}
 
 		$callback = Q::ifset($options, 'callback', null);
 
@@ -130,10 +218,11 @@ class AI_LLM_Openai extends AI_LLM implements AI_LLM_Interface
 		if (!imageistruecolor($img)) {
 			return false;
 		}
-		$transparent = imagecolortransparent($img) >= 0;
-		if ($transparent >= 0) {
+
+		if (imagecolortransparent($img) >= 0) {
 			return true;
 		}
+
 		return imagealphablending($img) === false;
 	}
 
@@ -147,6 +236,7 @@ class AI_LLM_Openai extends AI_LLM implements AI_LLM_Interface
 		}
 
 		foreach ($response['output'] as $item) {
+
 			if (Q::ifset($item, 'type', null) !== 'message') {
 				continue;
 			}
@@ -156,12 +246,19 @@ class AI_LLM_Openai extends AI_LLM implements AI_LLM_Interface
 			}
 
 			$out = '';
+
 			foreach ($item['content'] as $block) {
-				if (isset($block['type']) && $block['type'] === 'output_text'
-					&& isset($block['text']) && is_string($block['text'])) {
+
+				if (
+					isset($block['type']) &&
+					$block['type'] === 'output_text' &&
+					isset($block['text']) &&
+					is_string($block['text'])
+				) {
 					$out .= $block['text'] . "\n";
 				}
 			}
+
 			return trim($out);
 		}
 

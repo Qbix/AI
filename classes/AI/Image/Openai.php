@@ -15,7 +15,15 @@ class AI_Image_Openai extends AI_Image implements AI_Image_Interface
 	{
 		$apiKey = Q_Config::expect('AI', 'openAI', 'key');
 
-		$model   = Q::ifset($options, 'model', 'gpt-image-1.5');
+		$defaultModel = Q_Config::get(
+			'AI',
+			'images',
+			'openai',
+			'model',
+			'gpt-image-1.5'
+		);
+
+		$model = Q::ifset($options, 'model', $defaultModel);
 		$format  = strtolower(Q::ifset($options, 'format', 'png'));
 		$timeout = Q::ifset($options, 'timeout', 60);
 
