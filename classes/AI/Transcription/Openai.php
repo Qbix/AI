@@ -6,35 +6,40 @@
  * Provides AssemblyAI-style job semantics even though OpenAI
  * transcription is synchronous under the hood.
  *
- * @class AI_Transcription_OpenAI
+ * @class AI_Transcription_Openai
  * @extends AI_Transcription
  * @implements AI_Transcription_Interface
  */
 class AI_Transcription_Openai extends AI_Transcription implements AI_Transcription_Interface
 {
+	const DEFAULT_MODEL = 'whisper-1';
+
+	protected $model;
+
 	/**
 	 * In-memory job store (request lifetime only).
-	 * This mirrors job semantics for parity with other providers.
-	 *
-	 * @property jobs
-	 * @type array
-	 * @protected
 	 */
 	protected static $jobs = array();
+
+	function __construct()
+	{
+		$this->model = Q_Config::get(
+			'AI',
+			'transcription',
+			'models',
+			'openai',
+			self::DEFAULT_MODEL
+		);
+	}
 
 	/**
 	 * Submit a transcription job.
 	 *
 	 * Supported options:
-	 * - language (optional)
-	 * - model (default "whisper-1")
-	 * - timeout (seconds)
-	 * - callback (callable, optional)
-	 *
-	 * @method transcribe
-	 * @param {string} $source Publicly accessible audio/video URL
-	 * @param {array} $options Optional parameters
-	 * @return {array} Job metadata (id + status)
+	 * - language
+	 * - model
+	 * - timeout
+	 * - callback
 	 */
 	function transcribe($source, $options = array())
 	{
@@ -43,9 +48,12 @@ class AI_Transcription_Openai extends AI_Transcription implements AI_Transcripti
 		$jobId = 'openai_' . md5($source . microtime(true));
 		$apiKey = Q_Config::expect('AI', 'openAI', 'key');
 
+		$model = Q::ifset($options, 'model', $this->model);
+
 		// Download audio (OpenAI requires file upload)
 		$audio = @file_get_contents($source);
 		if ($audio === false) {
+
 			$response = array(
 				'id'     => $jobId,
 				'status' => 'FAILED',
@@ -55,6 +63,7 @@ class AI_Transcription_Openai extends AI_Transcription implements AI_Transcripti
 			if ($userCallback && is_callable($userCallback)) {
 				call_user_func($userCallback, $response);
 			}
+
 			return $response;
 		}
 
@@ -63,7 +72,7 @@ class AI_Transcription_Openai extends AI_Transcription implements AI_Transcripti
 
 		$postFields = array(
 			'file'  => new CURLFile($tmp),
-			'model' => Q::ifset($options, 'model', 'whisper-1')
+			'model' => $model
 		);
 
 		if (!empty($options['language'])) {
@@ -82,14 +91,21 @@ class AI_Transcription_Openai extends AI_Transcription implements AI_Transcripti
 		$callback = function ($response) use ($jobId, &$result, $userCallback) {
 
 			if ($response === false || $response === null) {
+
 				$result['status'] = 'FAILED';
 				$result['error']  = 'OpenAI API unreachable';
+
 			} else {
+
 				$data = json_decode($response, true);
+
 				if (!is_array($data) || empty($data['text'])) {
+
 					$result['status'] = 'FAILED';
 					$result['error']  = $data;
+
 				} else {
+
 					$result['status'] = 'COMPLETED';
 					$result['text']   = $data['text'];
 				}
@@ -124,23 +140,20 @@ class AI_Transcription_Openai extends AI_Transcription implements AI_Transcripti
 
 	/**
 	 * Fetch a previously submitted transcription.
-	 *
-	 * @method fetch
-	 * @param {string} $transcriptId
-	 * @param {array} $options Optional parameters:
-	 *   @param {callable} [$options.callback]
-	 * @return {array} Transcription result or status
 	 */
 	function fetch($transcriptId, $options = array())
 	{
 		$userCallback = Q::ifset($options, 'callback', null);
 
 		if (!isset(self::$jobs[$transcriptId])) {
+
 			$response = array(
 				'id'     => $transcriptId,
 				'status' => 'NOT_FOUND'
 			);
+
 		} else {
+
 			$response = self::$jobs[$transcriptId];
 		}
 
@@ -157,9 +170,6 @@ class AI_Transcription_Openai extends AI_Transcription implements AI_Transcripti
 
 	/**
 	 * Platform name.
-	 *
-	 * @property platform
-	 * @type string
 	 */
 	public $platform = 'OpenAI';
 }
