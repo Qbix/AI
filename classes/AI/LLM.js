@@ -35,12 +35,86 @@ module.exports = AI_LLM;
 AI_LLM.create = function(adapter, options) {
 	if (!adapter) return null;
 	if (typeof adapter === 'object') return adapter;
+	if (typeof adapter === 'function') return new adapter(options || {});
 	var sanitized = adapter.replace(/[^a-z0-9]+/gi, ' ').trim();
 	var suffix = sanitized.replace(/\s+(.)/g, function(_, c) { return c.toUpperCase(); });
 	suffix = suffix.charAt(0).toUpperCase() + suffix.slice(1);
 	var cls = AI_LLM[suffix];
 	if (cls) return new cls(options);
-	return null;
+	// Lazy-load from sibling file (classes/AI/LLM/<Adapter>.js)
+	try {
+		var path = require('path');
+		var Cls = require(path.join(__dirname, 'LLM', suffix + '.js'));
+		AI_LLM[suffix] = Cls;
+		return new Cls(options || {});
+	} catch (e) {
+		return null;
+	}
+};
+
+/**
+ * Route to an LLM adapter by deployment-configured route name.
+ *
+ * Resolves routeName via AI/llm/routes -> provider name, then looks up
+ * AI/llm/providers[providerName] = { class, config }. Falls back to
+ * AI/llm/default, then to first configured provider.
+ *
+ * Usage:
+ *   var llm = AI_LLM.route('smart');
+ *   var resp = await llm.executeModel(systemPrompt, inputs, options);
+ *
+ *   if (llm.supportsPrefixCache && llm.supportsPrefixCache()) {
+ *     await llm.executeWithCachedPrefix('cache-key', prefix, inputs, options);
+ *   }
+ *
+ * Config shape (parallel to PHP):
+ *   AI/llm/routes:    { routeName: providerName, ... }
+ *   AI/llm/providers: { providerName: { class, config }, ... }
+ *   AI/llm/default:   fallback providerName
+ *
+ * @param {string} routeName  e.g. 'smart', 'fast', 'vision', 'smart-cached'
+ * @param {object} [options]  Options merged over provider config; caller wins.
+ * @returns {object|null}     Adapter instance or null.
+ */
+AI_LLM.route = function(routeName, options) {
+	options = options || {};
+	var routes    = Q.Config.get(['AI', 'llm', 'routes'], {})    || {};
+	var providers = Q.Config.get(['AI', 'llm', 'providers'], {}) || {};
+	var deflt     = Q.Config.get(['AI', 'llm', 'default'], null);
+
+	var providerName = routes[routeName];
+	if (!providerName) providerName = deflt;
+	if (!providerName) {
+		var names = Object.keys(providers);
+		providerName = names.length ? names[0] : null;
+	}
+	if (!providerName) return null;
+
+	var def = providers[providerName];
+	if (!def) {
+		// No provider definition — treat providerName as direct adapter class name.
+		return AI_LLM.create(providerName, options);
+	}
+	if (!def.class) return null;
+
+	var merged = Object.assign({}, def.config || {}, options);
+	return AI_LLM.create(def.class, merged);
+};
+
+/**
+ * List configured route names.
+ */
+AI_LLM.listRoutes = function() {
+	var routes = Q.Config.get(['AI', 'llm', 'routes'], {}) || {};
+	return Object.keys(routes);
+};
+
+/**
+ * List configured provider names.
+ */
+AI_LLM.listProviders = function() {
+	var providers = Q.Config.get(['AI', 'llm', 'providers'], {}) || {};
+	return Object.keys(providers);
 };
 
 /**
