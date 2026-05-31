@@ -25,7 +25,7 @@
         "module": "AI",
         "action": "stream/command"
       }
-    }
+    },
 		"routes@end": {
 			
 		},
