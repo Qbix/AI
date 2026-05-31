@@ -1,5 +1,63 @@
 {
-  "AI": {
+  "Q": {
+		"pluginInfo": {
+			"AI": {
+				"version": "0.1",
+				"compatible": "0.1",
+				"requires": {
+					"Q": "1.0",
+					"Users": "1.0",
+					"Streams": "1.0",
+					"Websites": "1.0"
+				},
+				"permissions": [],
+				"connections": ["Users", "Streams", "Websites"]
+			}
+		},
+		"handlersBeforeEvent": {
+
+		},
+		"handlersAfterEvent": {
+			/*"Streams/create/Streams/image": ["AI/after/Streams_create_Streams_image"]*/
+		},
+    "routes@start": {
+      "AI/stream/command": {
+        "module": "AI",
+        "action": "stream/command"
+      }
+    }
+		"routes@end": {
+			
+		},
+		"routes": {
+		    "AI/webhook/:type/:task": {"module": "AI", "action": "webhook"}
+		},
+		"web": {
+
+		},
+		"javascript": {
+
+		},
+		"text": {
+
+		},
+		"images": {
+
+		}
+	},
+	"Users": {
+
+	},
+	"Streams": {
+
+	},
+	"AI": {
+		"observations": {
+			"AI": "observations.json"
+		},
+		"images": {
+			"batch": 2
+		},
     "commands": {
       "image/generate": {
         "handler": "AI/commands/imageGenerate",
@@ -58,14 +116,6 @@
       "assemblyai": {
         "key": null,
         "wordBoost": null
-      }
-    }
-  },
-  "Q": {
-    "routes@start": {
-      "AI/stream/command": {
-        "module": "AI",
-        "action": "stream/command"
       }
     }
   }
