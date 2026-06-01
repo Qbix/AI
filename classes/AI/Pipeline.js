@@ -189,6 +189,13 @@ class Pipeline {
             if (!result || result.action === 'none' || !result.action) return null;
             if (result.confidence != null && result.confidence < 0.7) return null;
 
+            // Attach web search citations from the adapter response, if any.
+            // Anthropic adapter always returns a citations[] (empty when no web
+            // search was used). Other adapters may not populate this field.
+            if (raw && Array.isArray(raw.citations) && raw.citations.length) {
+                result.citations = raw.citations;
+            }
+
             // Topic change for clip cutting
             const newTopic = this._extractTopic(result);
             if (newTopic && newTopic !== this._currentTopic) {

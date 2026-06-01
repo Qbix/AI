@@ -159,7 +159,8 @@ function register(AI, Q, Users) {
                 proposalId:        'replay_' + Date.now(),
                 visualizationType: data.visualizationType,
                 visualizationData: data.visualizationData,
-                streamType:        data.streamType
+                streamType:        data.streamType,
+                citations:         data.citations || []
             });
         });
 
@@ -770,6 +771,7 @@ async function _createAndShowStream(session, proposal, AI, Q, Users) {
         visualizationType: proposal.visualizationType,
         visualizationData: proposal.visualizationData,
         streamType,
+        citations:         proposal.citations || [],
     });
 
     // Durable card record — part of the presentation recording
@@ -780,6 +782,7 @@ async function _createAndShowStream(session, proposal, AI, Q, Users) {
             streamType,
             proposalId:        proposal.proposalId,
             relSec:            cardRelSec,
+            citations:         proposal.citations || [],
         });
         const Str = Q.require('Streams');
         Str.Message.post({
