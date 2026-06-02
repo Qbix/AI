@@ -9,8 +9,8 @@
  * ────
  *  1. ControlClassifier captures intent + display name ("Robert")
  *  2. Node resolves display name → userId via Streams.Avatar.fetchByPrefix
- *     (direct DB query, same logic as PHP, no roundtrip needed)
- *  3. Node posts an immediate ack message to the chat via Streams_Message.post()
+ *     (native static method, direct DB query — no PHP roundtrip)
+ *  3. Node posts an immediate ack message to the chat via Streams.Message.post()
  *  4. Node calls sendToPHP('AI/stream/command') — PHP action executes the
  *     privileged op (Streams::create, Streams_Access::save, etc.) as asUserId
  *  5. PHP action posts the result message to chat (success string or exception text)
@@ -33,9 +33,6 @@
  * @param {Object} Users  Users module
  */
 
-const Streams      = Q => Q.require('Streams');
-const AvatarPatch  = require('../../../classes/AI/Avatar.patch');
-
 module.exports = async function streamCommand(params, Q, Users) {
     const {
         command, userId, publisherId, streamName, chatStreamName,
@@ -44,19 +41,17 @@ module.exports = async function streamCommand(params, Q, Users) {
 
     if (!userId || !chatStreamName) return;
 
-    const Str = Streams(Q);
+    const Streams = Q.require('Streams');
 
     // ── Step 1: Resolve display name → userId via Streams.Avatar.fetchByPrefix ──
-    // Direct DB query — same logic as PHP Streams_Avatar::fetchByPrefix,
-    // implemented in AI/classes/AI/Avatar.patch.js. No PHP roundtrip needed.
     let targetUserId  = params.targetUserId || '';
     let targetDisplay = targetName || targetUserId;
 
     if (targetName && !targetUserId) {
         try {
             const avatars = await new Promise(function (resolve, reject) {
-                AvatarPatch.fetchByPrefix(
-                    userId, targetName, { limit: 1 }, Q,
+                Streams.Avatar.fetchByPrefix(
+                    userId, targetName, { limit: 1 },
                     function (err, rows) { err ? reject(err) : resolve(rows); }
                 );
             });
@@ -69,7 +64,6 @@ module.exports = async function streamCommand(params, Q, Users) {
             }
         } catch (e) {
             Q.log && Q.log('AI/streamCommand: avatar lookup failed', e.message);
-            // Proceed without userId — PHP action will surface the error
         }
     }
 
@@ -80,8 +74,8 @@ module.exports = async function streamCommand(params, Q, Users) {
         'revokeAccess': `Removing access for ${targetDisplay}…`,
     }[command] || 'Processing…';
 
-    await _postMessage(Str, {
-        publisherId: userId,   // tool stream is owned by the requesting user
+    await _postMessage(Streams, {
+        publisherId: userId,
         streamName:  chatStreamName,
         byUserId:    userId,
         type:        'AI/command/ack',
@@ -89,8 +83,6 @@ module.exports = async function streamCommand(params, Q, Users) {
     });
 
     // ── Step 3: Execute PHP action via sendToPHP ──────────────────────────
-    // PHP action: AI/handlers/AI/stream/command/response/content.php
-    // It runs the privileged Streams:: call asUserId and posts the result to chat.
     try {
         await Q.Utils.sendToPHP('AI/stream/command', {
             command,
@@ -104,11 +96,9 @@ module.exports = async function streamCommand(params, Q, Users) {
             writeLevel:       writeLevel || 'post',
             toolTitle:        toolTitle  || 'Tool',
         });
-        // Success: PHP has posted the result message to chat already
     } catch (e) {
-        // PHP returned an error in slots.errors — post it to chat
         Q.log && Q.log('AI/streamCommand: PHP error', e.message);
-        await _postMessage(Str, {
+        await _postMessage(Streams, {
             publisherId: userId,
             streamName:  chatStreamName,
             byUserId:    userId,
@@ -118,10 +108,10 @@ module.exports = async function streamCommand(params, Q, Users) {
     }
 };
 
-function _postMessage(Str, fields) {
+function _postMessage(Streams, fields) {
     return new Promise(function (resolve) {
         try {
-            Str.Message.post(fields, function () { resolve(); });
+            Streams.Message.post(fields, function () { resolve(); });
         } catch (e) { resolve(); }
     });
 }
