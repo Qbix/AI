@@ -255,26 +255,56 @@ AI._navCommand = function (session, data) {
     if (data.slideIndex  != null) session.slideIndex  = data.slideIndex;
     if (data.revealIndex != null) session.revealIndex = data.revealIndex;
     if (!session.publisherId || !session.streamName) return;
-    if (data.intent !== 'slide/navigate' && data.intent.indexOf('slide') !== 0) return;
 
-    var relSec     = data.relSec || Session.relSec(session);
-    var slideInstr = JSON.stringify({
-        index:  session.slideIndex,
+    var intent = data.intent || '';
+    var isSlide  = intent === 'slide/navigate'  || intent.indexOf('slide/')  === 0;
+    var isReveal = intent === 'reveal/navigate' || intent.indexOf('reveal/') === 0;
+    if (!isSlide && !isReveal) return;
+
+    var relSec = data.relSec || Session.relSec(session);
+
+    if (isSlide) {
+        var slideInstr = JSON.stringify({
+            index:  session.slideIndex,
+            relSec: relSec,
+            intent: intent,
+            query:  data.query || undefined
+        });
+        Session.postMessage(Q, {
+            publisherId:  session.publisherId,
+            streamName:   session.streamName,
+            byUserId:     session.userId,
+            type:         'Media/presentation/slide',
+            instructions: slideInstr,
+        }, function (err, message) {
+            if (!err && message) {
+                transcriptEmitter._appendVttEventNote(
+                    session, 'Media/presentation/slide',
+                    message.fields.ordinal, slideInstr, Q, message.fields.sentTime
+                );
+            }
+        });
+        return;
+    }
+
+    // Reveal — same shape, different type. Durable record so the VTT
+    // chapter markers carry within-slide reveal advances too.
+    var revealInstr = JSON.stringify({
+        index:  session.revealIndex,
         relSec: relSec,
-        intent: data.intent,
-        query:  data.query || undefined
+        intent: intent
     });
     Session.postMessage(Q, {
         publisherId:  session.publisherId,
         streamName:   session.streamName,
         byUserId:     session.userId,
-        type:         'Media/presentation/slide',
-        instructions: slideInstr,
+        type:         'Media/presentation/reveal',
+        instructions: revealInstr,
     }, function (err, message) {
         if (!err && message) {
             transcriptEmitter._appendVttEventNote(
-                session, 'Media/presentation/slide',
-                message.fields.ordinal, slideInstr, Q, message.fields.sentTime
+                session, 'Media/presentation/reveal',
+                message.fields.ordinal, revealInstr, Q, message.fields.sentTime
             );
         }
     });

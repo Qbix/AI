@@ -6,40 +6,65 @@
  * Q.handler for the 'tool/generate' voice command intent.
  * Loaded automatically into Q.handlers.AI.commands.toolGenerate.
  *
- * THE CONCEPT (v2 feature)
- * ─────────────────────────
- * Host says "build a chess board" or "create a countdown timer".
- * The LLM generates a complete Q.Tool.define() implementation.
- * The control page evaluates it, activates it in host mode.
- * The shared screen activates the same tool in broadcast mode.
+ * Host says "build a chess board" or "create a countdown timer". The LLM
+ * generates a complete Q.Tool.define() implementation. The control page
+ * evaluates it, activates it in host mode. The shared screen activates
+ * the same tool in broadcast mode.
  *
- * TWO MODES of the generated tool (same Q.Tool.define, different options):
+ * MODES (same Q.Tool.define, different options):
  *   mode: 'host'      — interactive, in the host's control pane
  *   mode: 'broadcast' — view-only or limited, on the shared ?f=1 screen
  *
- * This works without Safebots because:
- *   - Generated code runs in the browser, not on the server
- *   - No external API access from the tool itself
- *   - Host's own session, host's own browser
+ * Works pre-Safebots because generated code runs in the browser, not on
+ * the server. No external API access from the tool itself; host's own
+ * session, host's own browser. v2.1 with Safebots: generated tools that
+ * call external APIs, persist state, or run server-side logic go through
+ * the capability manifest and governed execution environment.
  *
- * For v2.1 with Safebots: generated tools that call external APIs,
- * persist state, or run server-side logic go through the capability
- * manifest and governed execution environment.
+ * SYSTEM PROMPT
+ * ─────────────
+ * Loaded from AI/data/toolGenerate.prompts.json, which holds both the
+ * generation prompt (`codeGen`) and an optional verification prompt
+ * (`verify`) that runs against the produced code. The older single-file
+ * `toolGenerate.prompt.txt` is superseded by the JSON.
  *
- * SYSTEM PROMPT TEMPLATE
- * ───────────────────────
- * Loaded from AI/data/toolGenerate.prompt.txt (included in zip).
- * Contains the Q.Tool.define() signature with examples from the docs.
- * The LLM is asked to produce a self-contained tool definition as a
- * JS string that can be eval()'d safely in the browser.
+ * PROVIDER
+ * ────────
+ * Routed via AI_LLM.route(...) — provider is config-driven. The route
+ * name is read from AI/commands/tool/generate/route (default 'smart').
+ * Swap Anthropic ↔ OpenAI ↔ etc. without touching this file. Web search
+ * is off by default for codegen (use options.webSearch=true to enable
+ * if you want it for documentation lookups).
+ *
+ * VERIFY PASS
+ * ───────────
+ * If `verify` is present in the prompts JSON and AI/commands/tool/generate/verify
+ * is true (default true), a second LLM call asks for { ok, reason } JSON.
+ * On `ok: false`, the code is rejected with the reason logged. Cheap
+ * safety net for "no fetch(), no eval, both modes handled" etc.
  *
  * @param {Object} captures  { prompt: String }
  * @param {Object} stream    Stream proxy
  * @param {Object} state     Presentation state
  * @param {Object} Q         Server-side Q object
  */
-const path = require('path');
-const fs   = require('fs');
+const path   = require('path');
+const fs     = require('fs');
+const AI_LLM = require('../../../classes/AI/LLM');
+
+let _promptsCache = null;
+function _loadPrompts(Q) {
+    if (_promptsCache) return _promptsCache;
+    const jsonPath = path.join(__dirname, '../../../data/toolGenerate.prompts.json');
+    try {
+        const raw = fs.readFileSync(jsonPath, 'utf8');
+        _promptsCache = JSON.parse(raw);
+    } catch (e) {
+        Q.log && Q.log('AI/toolGenerate: could not load prompts JSON', e.message);
+        _promptsCache = null;
+    }
+    return _promptsCache;
+}
 
 module.exports = async function toolGenerate(captures, stream, state, Q) {
     const prompt = captures && captures.prompt;
@@ -47,86 +72,119 @@ module.exports = async function toolGenerate(captures, stream, state, Q) {
 
     Q.log && Q.log('AI/toolGenerate: generating tool for "' + prompt + '"');
 
-    // Load system prompt template
-    const templatePath = path.join(__dirname, '../../../data/toolGenerate.prompt.txt');
-    let systemPrompt;
-    try {
-        systemPrompt = fs.readFileSync(templatePath, 'utf8');
-    } catch (e) {
-        Q.log && Q.log('AI/toolGenerate: could not load prompt template', e.message);
+    const prompts = _loadPrompts(Q);
+    if (!prompts || !prompts.codeGen) {
+        Q.log && Q.log('AI/toolGenerate: prompts JSON missing or has no codeGen key');
         return;
     }
 
-    const apiKey = Q.Config && Q.Config.get(['AI', 'anthropic', 'key'], null);
-    if (!apiKey) {
-        Q.log && Q.log('AI/toolGenerate: no Anthropic key configured');
+    // Route name is configurable per command. Default 'smart'.
+    const routeName = Q.Config.get(['AI', 'commands', 'tool/generate', 'route'], 'smart');
+    const modelOverride = prompts.model || null;
+
+    const baseOptions = {
+        max_tokens:  Q.Config.get(['AI', 'commands', 'tool/generate', 'maxTokens'], 4000),
+        temperature: Q.Config.get(['AI', 'commands', 'tool/generate', 'temperature'], 0.5),
+        webSearch:   Q.Config.get(['AI', 'commands', 'tool/generate', 'webSearch'], false)
+    };
+    if (modelOverride) baseOptions.model = modelOverride;
+
+    const adapter = AI_LLM.route(routeName, baseOptions);
+    if (!adapter) {
+        Q.log && Q.log('AI/toolGenerate: no LLM adapter for route "' + routeName + '"');
         return;
     }
 
+    // ── 1. Generation pass ────────────────────────────────────────────────────
+    const userPrompt = 'Build a Qbix tool for: ' + prompt.trim()
+        + '\n\nReturn ONLY the Q.Tool.define() call as a self-contained '
+        + 'JavaScript string. No explanation, no markdown fences.';
+
+    let code;
     try {
-        const resp = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'x-api-key':         apiKey,
-                'anthropic-version': '2023-06-01',
-                'content-type':      'application/json'
-            },
-            body: JSON.stringify({
-                model:      Q.Config.get(['AI', 'anthropic', 'model'], 'claude-sonnet-4-20250514'),
-                max_tokens: 4000,
-                system:     systemPrompt,
-                messages: [{
-                    role:    'user',
-                    content: 'Build a Qbix tool for: ' + prompt.trim()
-                            + '\n\nReturn ONLY the Q.Tool.define() call as a self-contained '
-                            + 'JavaScript string. No explanation, no markdown fences.'
-                }]
-            })
-        });
-
-        if (!resp.ok) {
-            Q.log && Q.log('AI/toolGenerate: LLM error', resp.status);
-            return;
-        }
-
-        const data  = await resp.json();
-        const code  = data.content && data.content[0] && data.content[0].text;
-        if (!code || !code.trim()) return;
-
-        // Sanitize: must start with Q.Tool.define(
-        const cleaned = code.trim();
-        if (!cleaned.startsWith('Q.Tool.define(') && !cleaned.startsWith('(function')) {
-            Q.log && Q.log('AI/toolGenerate: LLM output did not look like a tool definition');
-            return;
-        }
-
-        // Send directly to the host's clients via Users.Socket.emitToUser.
-        // toolGenerate bypasses the stream-ephemeral path (which is for presentation
-        // content visible to all) and goes socket-only to the host.
-        // control.js listens for Q.Socket.onEvent('AI/tool/generated').
-        const Users = state && state.Users;
-        const userId = state && state.userId;
-        if (Users && userId && typeof Users.Socket === 'object'
-        && typeof Users.Socket.emitToUser === 'function') {
-            Users.Socket.emitToUser(userId, 'AI/tool/generated', {
-                toolName: 'AI/generated/' + prompt.trim()
-                    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
-                prompt:   prompt,
-                code:     cleaned,
-            });
-        } else {
-            // Fallback: send as stream ephemeral (reaches everyone, not ideal)
-            stream.ephemeral('AI/tool/generated', {
-                toolName: 'AI/generated/' + prompt.trim()
-                    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
-                prompt:   prompt,
-                code:     cleaned,
-            });
-        }
-
-        Q.log && Q.log('AI/toolGenerate: tool code sent to veto queue');
-
+        const raw = await adapter.executeModel(
+            prompts.codeGen,
+            { text: userPrompt },
+            baseOptions
+        );
+        code = (typeof raw === 'string') ? raw : (raw && raw.text) || '';
     } catch (e) {
-        Q.log && Q.log('AI/toolGenerate: error', e.message);
+        Q.log && Q.log('AI/toolGenerate: LLM error', e.message);
+        return;
     }
+    if (!code || !code.trim()) return;
+
+    const cleaned = _stripMarkdownFences(code).trim();
+    if (!cleaned.startsWith('Q.Tool.define(') && !cleaned.startsWith('(function')) {
+        Q.log && Q.log('AI/toolGenerate: LLM output did not look like a tool definition');
+        return;
+    }
+
+    // ── 2. Verification pass (optional) ───────────────────────────────────────
+    const verifyEnabled = Q.Config.get(['AI', 'commands', 'tool/generate', 'verify'], true);
+    if (verifyEnabled && prompts.verify) {
+        try {
+            const verifyAdapter = AI_LLM.route(
+                Q.Config.get(['AI', 'commands', 'tool/generate', 'verifyRoute'], 'fast'),
+                { response_format: 'json' }
+            );
+            if (verifyAdapter) {
+                const verdictRaw = await verifyAdapter.executeModel(
+                    prompts.verify,
+                    { text: cleaned },
+                    { response_format: 'json', max_tokens: 200, temperature: 0 }
+                );
+                const verdictText = (typeof verdictRaw === 'string') ? verdictRaw : (verdictRaw && verdictRaw.text) || '';
+                try {
+                    const verdict = JSON.parse(_stripMarkdownFences(verdictText));
+                    if (verdict && verdict.ok === false) {
+                        Q.log && Q.log('AI/toolGenerate: verify rejected — ' + (verdict.reason || ''));
+                        return;
+                    }
+                } catch (e) {
+                    // Verifier returned unparseable JSON. Log and proceed —
+                    // failing closed on a flaky verifier would silently kill
+                    // valid tools; failing open with a log lets ops tune.
+                    Q.log && Q.log('AI/toolGenerate: verify response was not JSON; proceeding');
+                }
+            }
+        } catch (e) {
+            Q.log && Q.log('AI/toolGenerate: verify pass error', e.message);
+        }
+    }
+
+    // ── 3. Deliver to host's clients ──────────────────────────────────────────
+    const slug = prompt.trim().toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const payload = {
+        toolName: 'AI/generated/' + slug,
+        prompt:   prompt,
+        code:     cleaned
+    };
+
+    // Socket-only to the host (not stream-ephemeral, which fan-outs to all).
+    // control.js listens via Q.Socket.onEvent('AI/tool/generated').
+    const Users  = state && state.Users;
+    const userId = state && state.userId;
+    if (Users && userId && Users.Socket && typeof Users.Socket.emitToUser === 'function') {
+        Users.Socket.emitToUser(userId, 'AI/tool/generated', payload);
+    } else {
+        // Fallback: stream ephemeral. Reaches everyone, not ideal — but
+        // better than dropping the tool entirely.
+        stream.ephemeral('AI/tool/generated', payload);
+    }
+
+    Q.log && Q.log('AI/toolGenerate: delivered "' + payload.toolName + '"');
 };
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function _stripMarkdownFences(text) {
+    if (!text) return '';
+    // Some models still wrap output in ```javascript ... ``` despite the
+    // instruction. Strip the most common forms.
+    return text
+        .replace(/^\s*```(?:javascript|js|json)?\s*\n?/i, '')
+        .replace(/\n?```\s*$/i, '')
+        .trim();
+}

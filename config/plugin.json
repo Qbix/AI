@@ -15,6 +15,7 @@
 			}
 		},
 		"handlersBeforeEvent": {
+			"Q/responseExtras": ["AI/before/Q_responseExtras"],
 			"Streams/image/save": ["AI/before/Streams_image_save"]
 		},
 		"handlersAfterEvent": {
@@ -107,6 +108,12 @@
 			"provider": null,
 			"key": null,
 			"_providers": "elevenlabs | openai | google \u2014 null disables voice synthesis"
+		},
+		"speech": {
+			"provider": null,
+			"_providers": "deepgram | browser | null \u2014 client-side STT adapter. null/browser uses native SpeechRecognition; deepgram routes mic audio through the /Q socket to AI/Transcription/DeepgramStream on the server. Heuristic: if null but AI/deepgram/key is set, treated as 'deepgram'.",
+			"sampleRate": 16000,
+			"chunkMs": 100
 		},
 		"transcription": {
 			"provider": null,

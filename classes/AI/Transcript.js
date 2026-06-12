@@ -65,6 +65,12 @@ Transcript.process = async function (session, chunk, AI, Q, Users) {
             streamName:      session.streamName,
             toolStreamName:  session.toolStreamName || null,
             toolPublisherId: session.userId,
+            // Full session reference for handlers that need session-internal
+            // fields (sessionStartMs for relSec, transcriptFile for VTT cues,
+            // _displayNames for speaker tags). ControlClassifier ignores this
+            // — only command handlers reach in via state.session.
+            session:         session,
+            sessionStartMs:  session.sessionStartMs,
             Q:               Q,
             Users:           Users,
         };

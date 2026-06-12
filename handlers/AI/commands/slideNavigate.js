@@ -2,27 +2,43 @@
 /**
  * AI/handlers/AI/commands/slideNavigate.js
  *
- * Server-side handler for slide/navigate intent.
- * Called when client sends a Streams/utterance with intent:'slide/navigate'
- * — meaning the client's local PDF corpus search found no match.
+ * Server-side fallback for slide/navigate intent. Runs when the client
+ * couldn't resolve the navigation locally (the offline client classifier
+ * handles exact intents and local PDF text search; this handles semantic
+ * search across past cards and related streams using server-side data).
  *
  * Search order:
- *   1. Recent Media/presentation/card/show messages (last 200)
- *      Matches against visualizationData text (label, name, title, term, etc.)
- *      On match: emits AI/card/replay → replays card on canvas + new chat message
+ *   1. Recent Media/presentation/card/show messages (last 200) — matches
+ *      against visualizationData text. On match: emits AI/card/replay
+ *      directly to the user so the historical card reappears on canvas.
  *
- *   2. Related streams (existing behavior)
- *      Matches against stream title + key attributes
- *      On match: emits Streams/slide { slideIndex }
+ *   2. Related streams — matches against stream title + key attributes.
+ *      On match: posts a durable Media/presentation/slide message and
+ *      writes a VTT cue. Clients listening via onMessage advance.
  *
- *   3. No match: silent (server tried, nothing found)
+ *   3. No match: silent.
  *
- * The client already handled:
- *   - All exact navigation intents (next/prev/zoom/seek etc) — emitted direct ephemerals
- *   - PDF page search — searched local corpus, fell through if no match
+ * What changed from the previous version of this file:
+ * The fallback used to emit `stream.ephemeral('Streams/slide', { slideIndex })`,
+ * which is the legacy form per Media's messages.json. It now posts the
+ * canonical durable `Media/presentation/slide` message — same record that
+ * the client-side classifier and AI._navCommand produce — so recording
+ * chapter markers stay aligned regardless of which path classified the
+ * intent.
+ *
+ * Long-term: this whole handler should live in the Media plugin at
+ * Media/handlers/Media/commands/slideNavigate.js. It does Media work
+ * (slide navigation against Media/presentation/* records). It sits here
+ * for now because the intent dispatch chain still flows from the AI
+ * pipeline. When AI is updated to emit an `AI/intent` event for Media
+ * to consume, this file moves.
  *
  * @module AI
  */
+
+var Session = require('../../../classes/AI/Session');
+var transcriptEmitter = require('../../../../Streams/classes/Streams/TranscriptEmitter').transcriptEmitter;
+
 module.exports = async function slideNavigate(captures, stream, state, Q) {
     var query = (captures && captures.query) ? captures.query.toLowerCase().trim() : '';
     if (!query || !state || !state.publisherId || !state.streamName) return;
@@ -91,7 +107,11 @@ module.exports = async function slideNavigate(captures, stream, state, Q) {
             Q.log && Q.log('slideNavigate: stream match "' + query + '" → index ' +
                 best.index + ' "' + (best.stream.fields && best.stream.fields.title) + '"' +
                 ' (score=' + bestScore + ')');
-            stream.ephemeral('Streams/slide', { slideIndex: best.index });
+
+            // Post the durable Media/presentation/slide record. Clients on
+            // onMessage('Media/presentation/slide') react and advance.
+            // Replaces the legacy Streams/slide ephemeral emission.
+            _postSlideRecord(state, best.index, Q);
         } else {
             Q.log && Q.log('slideNavigate: no match for "' + query +
                 '" (best score=' + bestScore + ')');
@@ -101,6 +121,50 @@ module.exports = async function slideNavigate(captures, stream, state, Q) {
         Q.log && Q.log('slideNavigate error:', e.message);
     }
 };
+
+// ── Durable slide record ──────────────────────────────────────────────────────
+
+function _postSlideRecord(state, slideIndex, Q) {
+    // Transcript.js now passes the full session through classifyState as
+    // state.session, so we can compute relSec and write the VTT cue.
+    // Fallback: if state.session is missing (e.g. invoked outside the
+    // transcript pipeline), post the durable message without relSec and
+    // skip the VTT note.
+    var session = state.session || null;
+    var relSec  = session ? Session.relSec(session) : null;
+    var instrObj = {
+        index:  slideIndex,
+        intent: 'slide/navigate',
+        query:  state._navQuery || undefined
+    };
+    if (relSec != null) instrObj.relSec = relSec;
+    var instr = JSON.stringify(instrObj);
+
+    Session.postMessage(Q, {
+        publisherId:  state.publisherId,
+        streamName:   state.streamName,
+        byUserId:     state.userId,
+        type:         'Media/presentation/slide',
+        instructions: instr,
+    }, function (err, message) {
+        if (err) {
+            Q.log && Q.log('slideNavigate: postMessage error', err.message || err);
+            return;
+        }
+        if (state.slideIndex !== undefined) state.slideIndex = slideIndex;
+        if (session && message && transcriptEmitter
+                && transcriptEmitter._appendVttEventNote) {
+            transcriptEmitter._appendVttEventNote(
+                session,
+                'Media/presentation/slide',
+                message.fields.ordinal,
+                instr,
+                Q,
+                message.fields.sentTime
+            );
+        }
+    });
+}
 
 // ── Card message search ───────────────────────────────────────────────────────
 
@@ -112,7 +176,6 @@ async function _searchCardMessages(query, state, Str, Q) {
             {
                 type:  'Media/presentation/card/show',
                 limit: 200,
-                // most recent first — ordinal descending
             },
             function (err, msgs) {
                 resolve((!err && msgs) ? msgs : {});
