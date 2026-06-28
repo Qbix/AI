@@ -95,12 +95,29 @@
 			}
 		},
 		"image": {
-			"provider": "vertex",
-			"vertex": {
-				"projectId": null,
-				"location": "us-central1",
-				"model": "imagegeneration@006",
-				"provisionedThroughput": true
+			"default": "openai",
+			"providers": {
+				"openai": {"model": "dall-e-3"},
+				"aws": {"model": "stability.stable-diffusion-xl-v0"},
+				"google": {"background": "transparent"}
+			}
+		},
+		"llm": {
+			"default": "anthropic-direct",
+			"routes": {
+				"smart": "anthropic-direct",
+				"fast": "openai-mini",
+				"search": "anthropic-direct"
+			},
+			"providers": {
+				"anthropic-direct": {
+					"class": "Anthropic",
+					"config": {"model": "claude-3-5-sonnet-20241022"}
+					},
+					"openai-mini": {
+					"class": "Openai",
+					"config": {"model": "gpt-4o-mini"}
+				}
 			}
 		},
 		"schema": "Media/config/messages.schema.json",
