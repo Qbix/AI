@@ -40,11 +40,10 @@ function _loadSchema() {
     if (_schema) return _schema;
 
     var candidates = [
-        path.join(__dirname, '../../..', 'Media', 'config', 'messages.schema.json'),
-        process.env.MEDIA_PLUGIN_CONFIG_DIR
-            ? path.join(process.env.MEDIA_PLUGIN_CONFIG_DIR, 'messages.schema.json')
+        Q.pluginDir('AI', 'CONFIG')
+            ? path.join(Q.pluginDir('AI', 'CONFIG'), 'messages.schema.json')
             : null,
-        path.join(__dirname, '../../data', 'messages.schema.json')
+        path.join(__dirname, '../../..', 'AI', 'config', 'messages.schema.json'),
     ].filter(Boolean);
 
     for (var i = 0; i < candidates.length; i++) {
