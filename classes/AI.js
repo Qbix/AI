@@ -77,6 +77,46 @@ AI.listen = function () {
     var socket = Users.Socket.listen();
     var nsp = socket.io.of('/Q');
 
+    // ── Server-side audio transcription (Deepgram / AssemblyAI) ─────────
+    // Only when a provider is configured. The browser ships audio up; the
+    // adapter relays each transcript back down on AI/transcription/result.
+    // The client surfaces that as onResult and Streams emits the single
+    // upstream Streams/utterance, which is the one processing path — so this
+    // relays and never calls process() itself. Inert on browser-native.
+    var sttProvider = (Q.Config && Q.Config.get(['AI', 'transcription', 'provider'], null))
+        || (Q.Config && Q.Config.get(['AI', 'transcription', 'deepgram', 'key'], null) ? 'deepgram' : null);
+
+    if (sttProvider) {
+        var AI_Transcription = require('./AI/Transcription');
+
+        transcriptEmitter.on('sessionStart', function (evt) {
+            var session = Session.get(evt.sessionId);
+            if (!session || session.transcription) return;
+            var adapter = AI_Transcription.create(sttProvider);
+            if (!adapter) return;
+            session.transcription = adapter;
+            adapter.open(session, {
+                Q: Q,
+                onUtterance: function (chunk) {
+                    Users.Socket.emitToUser(session.userId, 'AI/transcription/result', chunk);
+                },
+                onError: function (e) {
+                    Users.Socket.emitToUser(session.userId, 'AI/error', {
+                        message: (adapter.platform || 'Transcription') + ' error: ' + (e && e.message),
+                        code: 502
+                    });
+                }
+            });
+        });
+
+        nsp.on('connection', function (client) {
+            client.on('AI/transcription/session/chunk', function (buffer) {
+                var session = Session.get(client.id);
+                if (session && session.transcription) session.transcription.send(buffer);
+            });
+        });
+    }
+
     nsp.on('connection', function (client) {
         if (client._aiRegistered) return;
         client._aiRegistered = true;
