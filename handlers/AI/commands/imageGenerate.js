@@ -6,7 +6,7 @@
  * Q.handler for the 'image/generate' voice command intent. Loads
  * automatically into Q.handlers.AI.commands.imageGenerate.
  *
- * Called by ControlClassifier when it matches an image/generate intent.
+ * Called by CommandsClassifier when it matches an image/generate intent.
  * Generates an image via the configured AI_Image adapter (Google/Vertex,
  * OpenAI, AWS, etc.) and adds it to the presentation's background gallery.
  * Falls back to a Pexels gallery query when no adapter is configured or the

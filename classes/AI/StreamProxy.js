@@ -8,7 +8,7 @@ var Session = require('./Session');
 var transcriptEmitter = require('../../../Streams/classes/Streams/TranscriptEmitter').transcriptEmitter;
 
 /**
- * Adapter that lets Media's `ControlClassifier` (which expects a `stream`
+ * Adapter that lets Media's `CommandsClassifier` (which expects a `stream`
  * object with `.ephemeral(type, payload)`) be driven from the server side
  * during transcript classification, without requiring a hydrated
  * Streams_Stream instance.

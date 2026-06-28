@@ -1,10 +1,13 @@
 "use strict";
 
 /**
+ * AI/classes/AI/Session.js
+ *
  * @module AI
  */
 
-var ControlClassifier = require('../../../Streams/classes/Streams/ControlClassifier');
+var Q       = require('Q');
+var Streams = require('Streams');
 
 /**
  * Per-socket AI session state and registry.
@@ -42,9 +45,9 @@ Session.create = function (client, userId, data, Q) {
     var role        = (data && data.role)        || 'participant';
     var mode        = (data && data.mode)        || 'live';
     var modes = {
-        composition:   (data && data.modes && data.modes.composition  !== false),
-        navigation:    (data && data.modes && data.modes.navigation   !== false),
-        transcription: (data && data.modes && data.modes.transcription !== false),
+        composition:   (data && data.modes && data.modes.composition   !== false),
+        navigation:    (data && data.modes && data.modes.navigation    !== false),
+        transcription: (data && data.modes && data.modes.transcription !== false)
     };
 
     var session = {
@@ -69,10 +72,12 @@ Session.create = function (client, userId, data, Q) {
         _displayNames:    {},
         sessionStartMs:   Date.now(),
         isOwnLivestream:  !!(data && data.isOwnLivestream),
-        classifier:       new ControlClassifier({ Q: Q }),
+        // Streams owns the classifier now. It reads its phrase sources via
+        // Q.Text.get based on the current language; no Q handle is threaded in.
+        classifier:       new Streams.CommandsClassifier({ locale: lang.split('-')[0] }),
         pipeline:         null,
         vetoQueue:        [],
-        vetoTimers:       new Map(),
+        vetoTimers:       new Map()
     };
 
     // Close any previous session on this socket
@@ -80,8 +85,6 @@ Session.create = function (client, userId, data, Q) {
     if (prev) Session.close(prev);
 
     Session.all.set(client.id, session);
-    session.classifier.locale = lang.split('-')[0];
-    session.classifier.reload();
 
     return session;
 };
@@ -139,7 +142,7 @@ Session.relSec = function (session) {
 
 /**
  * Post a durable message to a session's presentation stream.
- * Fire-and-forget — errors are logged.
+ * Fire-and-forget -- errors are logged.
  * @method postMessage
  * @static
  * @param {Object} Q
