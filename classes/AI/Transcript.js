@@ -15,7 +15,7 @@
  * @class AI.Transcript
  * @static
  */
-var Session = Q.require('Streams/Transcription/Session');
+var Session = Q.require('Streams/Transcript/Session');
 var Pipeline = Q.require('AI/Pipeline');
 var VetoQueue = Q.require('AI/VetoQueue');
 var CueAudio = Q.require('AI/CueAudio');
