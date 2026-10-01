@@ -8,10 +8,11 @@ function AI_discourse_post()
 		throw new Users_Exception_NotAuthorized();
 	}
 
-	Q_Request::requireFields(array('userId', 'apiKey', 'topicUrl', 'attitude'), true);
+	// The forum's API key comes only from Users/apps/discourse/<appId>/keys/system;
+	// an apiKey in the request is ignored.
+	Q_Request::requireFields(array('userId', 'topicUrl', 'attitude'), true);
 	$userId   = $_REQUEST['userId'];
 	$topicUrl = $_REQUEST['topicUrl'];
-	$apiKey   = $_REQUEST['apiKey'];
 	$attitude = $_REQUEST['attitude'];
 
 	// language preference
@@ -41,8 +42,9 @@ function AI_discourse_post()
 	if (substr($tail, -5) === '.json') {
 		$tail = substr($tail, 0, -5);
 	}
-	// slug/topicId[/postNumber] -- no dots, so no "..", no host or query
-	if (!preg_match('#^[A-Za-z0-9_%-]+(/[A-Za-z0-9_%-]+){0,2}$#', $tail)) {
+	// slug/topicId[/postNumber] -- no dots and no percent-encoding, so no
+	// ".." (literal or %2e%2e), no host or query
+	if (!preg_match('#^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+){0,2}$#', $tail)) {
 		throw new Q_Exception_WrongType(array(
 			'field' => 'topicUrl',
 			'type'  => 'a valid Discourse topic URL'
@@ -60,7 +62,7 @@ function AI_discourse_post()
 	}
 
 	// ensure user exists
-	Q::event('Users/discourse/post', compact('apiKey', 'userId', 'baseUrl'));
+	Q::event('Users/discourse/post', compact('userId', 'baseUrl'));
 
 	// get topic contents
 	$uxt = new Users_ExternalTo_Discourse(array(
@@ -69,7 +71,7 @@ function AI_discourse_post()
 		'appId'    => $baseUrl
 	));
 	$uxt->retrieve();
-	$uxt->setExtra(compact('baseUrl', 'apiKey'));
+	$uxt->setExtra(compact('baseUrl'));
 
 	$ret   = $uxt->getTopic($topicUrl);
 	$posts = Q::ifset($ret, 'post_stream', 'posts', array());
