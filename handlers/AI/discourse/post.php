@@ -31,8 +31,24 @@ function AI_discourse_post()
 			'type'  => 'a valid Discourse topic URL'
 		));
 	}
-	$baseUrl = $matches[1];
+	// Only a forum configured in Users/apps/discourse/<appId>/baseUrl is ever
+	// contacted, and at its configured address: this handler returns a digest
+	// of what it fetches, so a caller-chosen host would be a read SSRF.
+	// Nothing is configured by default, so by default this refuses.
+	// Checked before any request is made.
+	$baseUrl = Users_ExternalTo_Discourse::requireConfiguredBaseUrl($matches[1], 'topicUrl');
 	$tail    = $matches[3];
+	if (substr($tail, -5) === '.json') {
+		$tail = substr($tail, 0, -5);
+	}
+	// slug/topicId[/postNumber] -- no dots, so no "..", no host or query
+	if (!preg_match('#^[A-Za-z0-9_%-]+(/[A-Za-z0-9_%-]+){0,2}$#', $tail)) {
+		throw new Q_Exception_WrongType(array(
+			'field' => 'topicUrl',
+			'type'  => 'a valid Discourse topic URL'
+		));
+	}
+	$topicUrl = "$baseUrl/t/$tail";
 
 	// extract topic id and post number
 	if (preg_match('/(.*)\/(.*)\/(.*)/', $tail, $matches)) {
