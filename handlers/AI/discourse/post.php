@@ -8,10 +8,11 @@ function AI_discourse_post()
 		throw new Users_Exception_NotAuthorized();
 	}
 
-	Q_Request::requireFields(array('userId', 'apiKey', 'topicUrl', 'attitude'), true);
+	// The forum's API key comes only from Users/apps/discourse/<appId>/keys/system;
+	// an apiKey in the request is ignored.
+	Q_Request::requireFields(array('userId', 'topicUrl', 'attitude'), true);
 	$userId   = $_REQUEST['userId'];
 	$topicUrl = $_REQUEST['topicUrl'];
-	$apiKey   = $_REQUEST['apiKey'];
 	$attitude = $_REQUEST['attitude'];
 
 	// language preference
@@ -31,8 +32,25 @@ function AI_discourse_post()
 			'type'  => 'a valid Discourse topic URL'
 		));
 	}
-	$baseUrl = $matches[1];
+	// Only a forum configured in Users/apps/discourse/<appId>/baseUrl is ever
+	// contacted, and at its configured address: this handler returns a digest
+	// of what it fetches, so a caller-chosen host would be a read SSRF.
+	// Nothing is configured by default, so by default this refuses.
+	// Checked before any request is made.
+	$baseUrl = Users_ExternalTo_Discourse::requireConfiguredBaseUrl($matches[1], 'topicUrl');
 	$tail    = $matches[3];
+	if (substr($tail, -5) === '.json') {
+		$tail = substr($tail, 0, -5);
+	}
+	// slug/topicId[/postNumber] -- no dots and no percent-encoding, so no
+	// ".." (literal or %2e%2e), no host or query
+	if (!preg_match('#^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+){0,2}$#', $tail)) {
+		throw new Q_Exception_WrongType(array(
+			'field' => 'topicUrl',
+			'type'  => 'a valid Discourse topic URL'
+		));
+	}
+	$topicUrl = "$baseUrl/t/$tail";
 
 	// extract topic id and post number
 	if (preg_match('/(.*)\/(.*)\/(.*)/', $tail, $matches)) {
@@ -44,7 +62,7 @@ function AI_discourse_post()
 	}
 
 	// ensure user exists
-	Q::event('Users/discourse/post', compact('apiKey', 'userId', 'baseUrl'));
+	Q::event('Users/discourse/post', compact('userId', 'baseUrl'));
 
 	// get topic contents
 	$uxt = new Users_ExternalTo_Discourse(array(
@@ -53,7 +71,7 @@ function AI_discourse_post()
 		'appId'    => $baseUrl
 	));
 	$uxt->retrieve();
-	$uxt->setExtra(compact('baseUrl', 'apiKey'));
+	$uxt->setExtra(compact('baseUrl'));
 
 	$ret   = $uxt->getTopic($topicUrl);
 	$posts = Q::ifset($ret, 'post_stream', 'posts', array());
