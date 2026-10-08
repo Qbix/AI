@@ -477,12 +477,20 @@ function _buildStaticPrefix() {
         '   including on "none" turns. It is your only memory of the talk so far.',
         '8. Transcript starts with "Safebots," -> action MUST be "propose" or',
         '   "ephemeral". Never "coaching" or "none" for a direct wake-word request.',
+        '9. Every field marked (required) in a visualization type\'s field list above',
+        '   (see ALL VISUALIZATION TYPES) must be filled in with real content -- never',
+        '   omitted or left blank just because you\'re unsure. Most commonly missed:',
+        '   article\'s keyClaim (a 2-3 sentence summary) is required even when you have',
+        '   no url for the article -- a title with no keyClaim renders as a bare,',
+        '   unexplained headline with nothing else on the card.',
         '',
         '## REMINDER',
         '"action" is always exactly one of: propose, ephemeral, coaching, none.',
         '"visualizationData" and "ephemeralPayload" are plain JSON objects, never strings.',
         'Every field must be present (set unused ones to null; contextSummary is never null).',
         'Transcript starts with "Safebots," -> "propose" or "ephemeral", never "coaching"/"none".',
+        'Fields marked (required) in a visualization type must have real content, not be',
+        'blank or omitted -- e.g. article always needs keyClaim.',
         'Re-read the CORRECT EXAMPLE above before responding.'
     ].join('\n').trim();
 
