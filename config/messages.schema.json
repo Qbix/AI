@@ -687,11 +687,12 @@
 				"url": {
 					"type": "string",
 					"required": false,
-					"description": "Only include this if you have a genuine, specific URL for this exact article -- never fabricate or guess one. When present, the headline becomes clickable and a \"Read more\" link is added after the summary; when absent, the card is correctly non-clickable, so omitting it is always safer than a made-up link."
+					"description": "The article's own page -- only include this if you have a genuine, specific URL for this exact article (never fabricate or guess one). When present, the headline becomes clickable and a \"Read more\" link is added after the summary; when absent, the card is correctly non-clickable, so omitting it is always safer than a made-up link. This is DIFFERENT from imageUrl below -- don't put the article's page link there instead of here."
 				},
 				"imageUrl": {
 					"type": "string",
-					"required": false
+					"required": false,
+					"description": "A DIRECT link to an actual IMAGE FILE (e.g. ending .jpg/.png/.webp, or otherwise known to serve image bytes) such as a photo or thumbnail -- NEVER the article's own page URL. If you only have the article's page link and no separate real image, put it in \"url\" above and leave imageUrl out entirely; putting it here instead makes the image fail to load AND leaves the headline with nothing to link to."
 				},
 				"date": {
 					"type": "string",
