@@ -84,7 +84,8 @@
 				"openai": {"model": "dall-e-3"},
 				"aws": {"model": "stability.stable-diffusion-xl-v0"},
 				"google": {"background": "transparent"}
-			}
+			},
+			"autoFaceIcon": false
 		},
 		"llm": {
 			"default": "anthropic-direct",
