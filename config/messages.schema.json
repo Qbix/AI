@@ -668,7 +668,7 @@
 		},
 		"article": {
 			"streamType": "Media/card/article",
-			"description": "News article or content reference with headline and key claim.",
+			"description": "News article or content reference with headline and summary. The card only ever shows what you put in these fields -- there is no full article text anywhere, so a title with no keyClaim renders as a bare, unexplained headline. Always include a real keyClaim.",
 			"fields": {
 				"title": {
 					"type": "string",
@@ -681,16 +681,18 @@
 				},
 				"keyClaim": {
 					"type": "string",
-					"required": false,
-					"description": "The key factual claim in 1-2 sentences."
+					"required": true,
+					"description": "A 2-3 sentence summary of the article's actual content -- this is the card's only body text, so never leave it blank just because url/publication/date are unknown."
 				},
 				"url": {
 					"type": "string",
-					"required": false
+					"required": false,
+					"description": "The article's own page -- only include this if you have a genuine, specific URL for this exact article (never fabricate or guess one). When present, the headline becomes clickable and a \"Read more\" link is added after the summary; when absent, the card is correctly non-clickable, so omitting it is always safer than a made-up link. This is DIFFERENT from imageUrl below -- don't put the article's page link there instead of here."
 				},
 				"imageUrl": {
 					"type": "string",
-					"required": false
+					"required": false,
+					"description": "A DIRECT link to an actual IMAGE FILE (e.g. ending .jpg/.png/.webp, or otherwise known to serve image bytes) such as a photo or thumbnail -- NEVER the article's own page URL. If you only have the article's page link and no separate real image, put it in \"url\" above and leave imageUrl out entirely; putting it here instead makes the image fail to load AND leaves the headline with nothing to link to."
 				},
 				"date": {
 					"type": "string",
@@ -922,7 +924,7 @@
 		},
 		"graph": {
 			"streamType": "Media/visualization/graph",
-			"description": "Force-directed node-edge graph. Nodes repel, edges attract. Nodes bounce and rebalance as you add/remove them. Use for relationship maps, org charts, concept webs, 'who knows who'.",
+			"description": "Force-directed node-edge graph. Nodes repel, edges attract. Nodes bounce and rebalance as you add/remove them. Use for relationship maps, org charts, concept webs, 'who knows who'. Circle SIZE is driven by each node's value (see the nodes field) -- ALWAYS set it to reflect the item's relative importance/magnitude on this specific topic (e.g. market cap or revenue for companies, seats won or poll share for political parties, population for countries/cities, follower count or box office for people/films). If no obvious quantitative measure fits the topic, still set value using your own judgment of relative prominence -- values must VARY across the node set (not be uniform/omitted), or every circle renders the same size and the graph loses this dimension entirely.",
 			"messageType": "Media/presentation/graph/update",
 			"nodeTypes": {
 				"person": "Avatar circle with photo + name. Use imageUrl for the photo.",
@@ -942,7 +944,7 @@
 				},
 				"nodes": {
 					"type": "array",
-					"description": "[{ id, type, label, imageUrl?, value? }]",
+					"description": "[{ id, type, label, imageUrl?, value? }] -- value is a plain number (any unit/scale; only RELATIVE magnitude across this node set matters) that drives circle size. Set it on every node -- see the description above for how to choose it.",
 					"required": false
 				},
 				"edges": {
@@ -957,17 +959,20 @@
 					{
 						"id": "anthropic",
 						"type": "company",
-						"label": "Anthropic"
+						"label": "Anthropic",
+						"value": 61
 					},
 					{
 						"id": "openai",
 						"type": "company",
-						"label": "OpenAI"
+						"label": "OpenAI",
+						"value": 157
 					},
 					{
 						"id": "claude",
 						"type": "concept",
-						"label": "Claude"
+						"label": "Claude",
+						"value": 30
 					}
 				],
 				"edges": [

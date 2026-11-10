@@ -25,13 +25,18 @@ var TYPE_MAP = {
     lineChart:  'Media/chart/line',
     map:        'Media/card/map',
     slide:      'Media/card/slide',
+    graph:      'Media/visualization/graph',
+    table:      'Media/visualization/table',
 };
 
 /**
  * Dispatch a committed proposal to the right rendering path:
- *   - graph / table → ephemeral update event
- *   - slide         → slideGenerate command handler
- *   - everything else → AI/proposal/show emit + durable card message
+ *   - everything, including graph/table → AI/proposal/show emit + durable
+ *     card message, same as every other type (see _applyByType in
+ *     Media/web/js/tools/presentation.js, which routes by streamType to
+ *     the right tool -- Q/visualization/table, Q/visualization/graph,
+ *     etc. -- via _showInlineCard, exactly like comparison/stat/slide/...)
+ *   - slide → slideGenerate command handler
  *
  * @class AI.CardCommit
  * @static
@@ -46,11 +51,17 @@ function CardCommit() {}
 CardCommit.show = function (session, proposal) {
     var vizType = proposal.visualizationType;
 
-    // graph / table go through the ephemeral update path (fanned to Q/visualization/* tools)
-    if (vizType === 'graph' || vizType === 'table') {
-        CardCommit._ephemeralUpdate(session, proposal);
-        return;
-    }
+    // graph/table used to fan out ONLY an ephemeral update here (see the
+    // now-unused _ephemeralUpdate below) and return early, skipping the
+    // durable message every other type posts -- meaning they never
+    // survived a reconnect or replay, and depended on a stateful "is
+    // there already a widget to update in place" path (_updateTable/
+    // _updateGraph in presentation.js, also now unused) that doesn't yet
+    // have any way to know what's actually on screen. Disabled per
+    // explicit request until that's built properly -- graph/table now
+    // fall straight through to the same TYPE_MAP + durable-message path
+    // as every other card type, rebuilt fresh each time via
+    // _showInlineCard rather than updated in place.
 
     /* // Slide proposals run through the AI-composed-HTML pipeline
     if (vizType === 'slide') {
@@ -107,7 +118,12 @@ CardCommit.show = function (session, proposal) {
 };
 
 /**
- * Graph / table proposals fan out as ephemeral update events.
+ * Graph / table proposals used to fan out as ephemeral update events,
+ * for in-place updates to an already-rendered Q/visualization/* widget.
+ * Currently UNUSED -- CardCommit.show no longer calls this, per explicit
+ * request, until the model has a reliable way to know what's actually on
+ * screen before deciding to mutate it in place vs. rebuild fresh. Left
+ * defined (not deleted) for when that's built.
  * @method _ephemeralUpdate
  * @private
  * @static
